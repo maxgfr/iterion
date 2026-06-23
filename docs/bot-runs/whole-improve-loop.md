@@ -59,14 +59,21 @@ to branch `willy/iterion-code-quality-2026-06-23` (cleanups as one commit).
    as the unprivileged container user, so the CLAUDE.md `devbox run -- …`
    convention dies before the build; the fixer correctly fell back to bare `go`.
    `verify-build` skill now documents this fallback.
-4. **OPEN — reviewer context overflow on large repos.** Run 2 ended
-   `failed_resumable` when `reviewer_gpt` (gpt-5.5) hit `context_length_exceeded`
-   at review_loop 11: the **`cumulative_scanned_areas` + `prior_pushback`** fed to
-   every reviewer grow unbounded across passes and eventually blow the window
-   (generation.go's reactive compaction can't shrink a single oversized *input*
-   prompt). Fix candidates: cap/summarise the accumulated feedback before
-   injection; or default to `scope_globs` to keep chunk count down; or route the
-   reviewer to a larger-context model.
+4. **Reviewer context overflow on large repos → MITIGATED.** Run 2 ended
+   `failed_resumable` when `reviewer_gpt` (gpt-5.5 forfait) hit
+   `context_length_exceeded` at review_loop 11. Measured: the accumulated
+   `cumulative_scanned_areas`+`prior_pushback` was only ~4 K tokens — **not** the
+   cause; the dominant input is the inline `chunk_content` (was ≤ 30 K tokens) vs
+   gpt-5.5 forfait's effective window (well below the API's). **Fix (A+B,
+   configurable):** lowered `max_review_chunk_tokens` default 30000 → **16000**
+   (fits the default forfait reviewer with head-room), and added model-adaptive
+   sizing — `reviewer_context_tokens` (+ `reviewer_context_percent`, default 45):
+   when set, the chunk budget is capped at that %-of-window and the `MAX_CHUNKS`
+   rebudget can no longer re-inflate past the ceiling (big repos take more passes
+   instead of a bigger chunk). **Deeper follow-up under discussion:** write the
+   reviewer's context as structured markdown + an index file and let the
+   reviewer/fixer node explore it on demand (agentic progressive disclosure)
+   instead of inlining everything — supersedes fixed chunk sizing; ADR-worthy.
 5. **New capability used:** `iterion run --max-cost-usd` (+ `--max-tokens`,
    `--max-duration`, `--max-iterations`, `--max-parallel-branches`) on `run` and
    `resume` — set the $120 ceiling without editing the bot (branch

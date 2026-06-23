@@ -77,13 +77,33 @@ vars:
   ## groups source files by package/folder into chunks of at most this
   ## many estimated tokens (~4 bytes/token), and each review pass audits
   ## ONE chunk. This keeps a ~150k+ LoC workspace from exhausting the
-  ## reviewer's context window on the first iteration. 30000 leaves
-  ## ample head-room under a 200k context for the chunk content + the
-  ## system/user prompt + the model's reasoning. Lower it on a smaller
-  ## context model; raise it to review more per pass (fewer chunks,
-  ## faster convergence) at the cost of a larger per-pass prompt.
+  ## reviewer's context window on the first iteration. This is the HARD
+  ## CEILING on chunk size; the adaptive sizing below may lower the
+  ## effective budget further but never raise it above this. Default
+  ## 16000 (was 30000) fits the SMALLEST default reviewer — openai/gpt-5.5
+  ## over the ChatGPT forfait, whose effective window is well below the
+  ## API's — with head-room for the system prompt + the cross-pass
+  ## scanned_areas/pushback feedback + the model's reasoning (a 30000
+  ## chunk overflowed gpt-5.5 forfait at review_loop 11, run 019ef550).
+  ## Raise it for a claude-only run (huge window → fewer chunks, faster
+  ## convergence); lower it on a tiny-context model.
   ## See docs/adr/011-whole-improve-loop-context-chunking.md.
-  max_review_chunk_tokens: int = 30000
+  max_review_chunk_tokens: int = 16000
+  ## Model-adaptive chunk sizing (B). When > 0, snapshot_chunk caps the
+  ## chunk budget at reviewer_context_percent% of this value (and never
+  ## above max_review_chunk_tokens), so the chunk scales to the SMALLEST
+  ## reviewer's REAL context window instead of a fixed guess. Set it to
+  ## that model's usable input window in tokens — e.g.
+  ## --var reviewer_context_tokens=32000 for a constrained forfait model.
+  ## 0 (default) = disabled: max_review_chunk_tokens is used as-is. Kept a
+  ## var (not auto-detected) so the bot stays a pure DSL+tool workflow and
+  ## the operator can pin the window for whatever reviewer they configure.
+  reviewer_context_tokens: int = 0
+  ## Percent of reviewer_context_tokens a chunk may occupy when adaptive
+  ## sizing is on; the rest is reserved for the system prompt, the
+  ## accumulated scanned_areas/pushback fed back each pass, and the
+  ## model's reasoning/output. 45 leaves > half the window for those.
+  reviewer_context_percent: int = 45
   ## Per-run FIX HEADROOM beyond one full clean sweep (issue #12). The
   ## review_loop cap is NOT this value directly — snapshot_chunk emits a
   ## dynamic loop_max = num_chunks + max_review_passes: num_chunks passes
@@ -714,13 +734,29 @@ schema fix_output:
 ## POSIX + python3 (the same toolchain sec-audit-source's tool nodes
 ## rely on); keep it double-quote-free so `python3 -c "..."` stays intact.
 tool snapshot_chunk:
-  command: `WS={{vars.workspace_dir}} BUDGET={{vars.max_review_chunk_tokens}} MAXPASSES={{vars.max_review_passes}} SCOPE_GLOBS={{vars.scope_globs}} STATE_IN={{input.incoming_clean_streak}} STATE_CURSOR={{input.incoming_cursor}} python3 -c "
+  command: `WS={{vars.workspace_dir}} BUDGET={{vars.max_review_chunk_tokens}} RCT={{vars.reviewer_context_tokens}} RCP={{vars.reviewer_context_percent}} MAXPASSES={{vars.max_review_passes}} SCOPE_GLOBS={{vars.scope_globs}} STATE_IN={{input.incoming_clean_streak}} STATE_CURSOR={{input.incoming_cursor}} python3 -c "
 import os, sys, json, fnmatch
 
 ws = os.environ.get('WS', '.')
-budget = int(os.environ.get('BUDGET', '30000') or '30000')
+budget = int(os.environ.get('BUDGET', '16000') or '16000')
 if budget <= 0:
-    budget = 30000
+    budget = 16000
+# Model-adaptive chunk sizing (B): when reviewer_context_tokens (RCT) > 0,
+# cap the chunk budget at RCP percent of the SMALLEST reviewer's real context
+# window, so the inline chunk + system prompt + accumulated feedback + the
+# model's reasoning never overflow that window (a 30000 chunk overflowed
+# gpt-5.5 forfait at run 019ef550). Never raises the budget above the
+# max_review_chunk_tokens ceiling, only lowers it.
+rct = int(os.environ.get('RCT', '0') or '0')
+rcp = int(os.environ.get('RCP', '45') or '45')
+if rct > 0 and rcp > 0:
+    adaptive = (rct * rcp) // 100
+    if adaptive > 0 and adaptive < budget:
+        budget = adaptive
+# Hard upper bound on the per-chunk budget after A (lowered default) + B
+# (adaptive). The MAX_CHUNKS rebudget below must NOT exceed this, or a large
+# repo would re-inflate the chunk past the reviewer's window.
+chunk_ceiling = budget
 
 # Per-run FIX HEADROOM beyond one full clean sweep (issue #12). The
 # review_loop bound is emitted below as loop_max = num_chunks + max_passes:
@@ -951,7 +987,11 @@ num_chunks = len(chunks)
 # of 100+ passes / fragile multi-run amortization.
 MAX_CHUNKS = 24
 if num_chunks > MAX_CHUNKS and total_tokens > 0:
-    budget = (total_tokens // MAX_CHUNKS) + 1
+    # Respect the adaptive/ceiling budget: never raise the chunk size above
+    # chunk_ceiling just to cap the chunk COUNT, or a large repo on a small
+    # reviewer window would overflow again. If the ceiling forces > MAX_CHUNKS
+    # chunks, accept the higher pass count (loop_max scales with num_chunks).
+    budget = min(chunk_ceiling, (total_tokens // MAX_CHUNKS) + 1)
     chunks = pack(pkgs, budget)
     num_chunks = len(chunks)
 
