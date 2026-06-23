@@ -279,6 +279,68 @@ prompt review_system:
       them. The goal is an accurate record that CONVERGES, not a
       perfect essay. NEVER re-raise an item already in
       `input.prior_pushback` without genuinely new evidence.
+
+      6a. PHANTOM REJECTIONS ARE A BUG. If you have ZERO concrete
+      blockers to list, vote `approved=true` (or at minimum,
+      `approved=false` with `confidence: low` so the streak gate
+      treats your verdict as non-blocking). Returning
+      `approved=false / blocker_count=0 / confidence=high` is the
+      pathological pattern that exhausted opus's review_loop on
+      the 2026-06-23 dogfood — a strong rejection signal with
+      nothing to act on, which the fixer cannot address (zero
+      blockers = no work to do, no path back to a manifest
+      refresh). If the manifest still reports residual
+      `decision_drift` candidates but you genuinely consider them
+      all non-actionable (mechanic-dressed-as-decision,
+      already-covered-by-other-ADR, no-real-alternative), say so
+      explicitly: vote `approved=true` and list those candidate
+      ids in `audited_drift_ids`. The cross-family steady-state
+      escape in `streak_check` will only fire when BOTH families
+      report `blocker_count==0` — your honest "nothing to fix"
+      verdict is what unblocks convergence.
+
+   7. CONVERGENCE — DO NOT RE-LITIGATE (v0.2.0). This is a review
+      LOOP that must converge to an asymptote. Re-raising an item
+      the loop has already adjudicated is the classic oscillation
+      driver — it resets the streak gate and burns the iteration
+      budget. Three signals tell you what is already settled:
+
+      a. `input.cumulative_dismissed_drift_ids` — the union of
+         every drift/orphan id that a prior reviewer (any family)
+         put into `audited_drift_ids` WHILE raising zero blockers
+         on that iter. I.e. items the cross-family review already
+         decided are NOT actionable. Do NOT re-raise any id in
+         this list UNLESS you have NEW EVIDENCE the prior
+         adjudication missed (e.g. you re-read the code anchor
+         and found a real misstatement the previous pass
+         overlooked). If you must re-raise, state the new evidence
+         in the blocker's `suggested_fix` explicitly so the
+         cross-family next reviewer can spot-check.
+
+      b. `input.cumulative_pushback` — the union of every blocker
+         the fixer pushed back (across both families) with its
+         justification. The fixer has already declined these as
+         false-positives, mechanic-dressed-as-decision, or
+         code-bug-not-doc-bug. Do NOT re-raise the same blocker
+         unless you can rebut the fixer's justification with NEW
+         evidence.
+
+      c. `loop.review_loop.previous_output.blockers` +
+         `previous_output.confidence` — the previous reviewer's
+         verdict (other family, last iter — visible to you below
+         the gates section in the user prompt). Verdicts must
+         trend MONOTONICALLY: if the previous reviewer raised N
+         blockers with high confidence and the fixer applied a
+         fix, you should expect ≤N residual blockers (commonly 0).
+         If you raise MORE blockers, justify what changed (fix
+         introduced regression, fixer pushed back a real drift,
+         etc.).
+
+      Default posture: when a candidate id appears in (a) or its
+      blocker appears in (b), DISMISS without spending a tool call.
+      Spending tool calls on already-settled items is the exact
+      oscillation pattern that blew past review_loop(10) on
+      2026-06-23.
    7. GAPS BYPASS REVIEW (the convergence rule). You do NOT see
       or review completeness gaps — they are routed STRUCTURALLY
       from `build_manifest` straight to `prepare_commit`'s handoff
@@ -340,13 +402,27 @@ prompt review_user_claude:
   ## Cross-family context
 
   Previous reviewer's verdict (other family, last iteration —
-  empty on iter 0):
+  empty on iter 0). Note the prior `confidence` — verdicts MUST
+  trend monotonically (see review_system rule 7c):
   {{loop.review_loop.previous_output}}
 
-  Items the fixer pushed back as false-positive:
+  Items the fixer pushed back as false-positive LAST iteration:
   {{input.prior_pushback}}
   Justification:
   {{input.prior_pushback_justification}}
+
+  ## Already-adjudicated (do NOT re-raise without NEW evidence)
+
+  Drift/orphan ids that prior reviewers (any family) marked as
+  not-actionable across the ENTIRE run (cumulative). Per
+  review_system rule 7a, dismiss these on sight unless you have
+  new evidence the prior pass missed:
+  {{input.cumulative_dismissed_drift_ids}}
+
+  Every blocker the fixer has pushed back across the run
+  (cumulative). Per review_system rule 7b, do NOT re-raise unless
+  you can rebut the fixer's justification with new evidence:
+  {{input.cumulative_pushback}}
 
   ## Gates
 
@@ -381,17 +457,28 @@ prompt review_user_claude:
 
   Spot-check budget: `tool_max_steps: 25`. Trust the manifest by
   default; spend tool calls on the top 2-3 highest-stakes
-  candidates only.
+  candidates only. CRITICAL — re-litigation costs the streak. If
+  a candidate id appears in `input.cumulative_dismissed_drift_ids`
+  or its blocker appears in `input.cumulative_pushback`, the
+  default is DISMISS without spending a tool call.
 
   Output schema (verdict_output):
-   - approved: bool — true ONLY when blockers == [] AND
-     coverage_pct >= coverage_target_pct
+   - approved: bool — true when blockers == [] AND (coverage_pct
+     >= coverage_target_pct OR the residual drift candidates are
+     all judged non-actionable per rule 6a)
    - family: "claude"
    - blockers: structured mismatch objects
    - blocker_count: int == len(blockers)
    - fix_plan: short instruction set for the fixer
    - confidence: "low" / "medium" / "high"
    - scanned_areas: distinct paths/areas you investigated this iter
+   - audited_drift_ids: list of `id` values from decision_drift /
+     adr_orphans you adjudicated this iter (any disposition —
+     confirm or dismiss). When you raise zero blockers, these ids
+     are folded into cumulative_dismissed_drift_ids so the
+     cross-family next reviewer dismisses them on sight (see
+     rule 7a). Use the candidate's stable id (e.g. "drift-045",
+     "orphan-NNN"); never invent ids.
 
 prompt review_user_gpt:
   Adjudicate the ADR drift candidates in
@@ -429,13 +516,27 @@ prompt review_user_gpt:
   ## Cross-family context
 
   Previous reviewer's verdict (other family, last iteration —
-  empty on iter 0):
+  empty on iter 0). Note the prior `confidence` — verdicts MUST
+  trend monotonically (see review_system rule 7c):
   {{loop.review_loop.previous_output}}
 
-  Items the fixer pushed back as false-positive:
+  Items the fixer pushed back as false-positive LAST iteration:
   {{input.prior_pushback}}
   Justification:
   {{input.prior_pushback_justification}}
+
+  ## Already-adjudicated (do NOT re-raise without NEW evidence)
+
+  Drift/orphan ids that prior reviewers (any family) marked as
+  not-actionable across the ENTIRE run (cumulative). Per
+  review_system rule 7a, dismiss these on sight unless you have
+  new evidence the prior pass missed:
+  {{input.cumulative_dismissed_drift_ids}}
+
+  Every blocker the fixer has pushed back across the run
+  (cumulative). Per review_system rule 7b, do NOT re-raise unless
+  you can rebut the fixer's justification with new evidence:
+  {{input.cumulative_pushback}}
 
   ## Gates
 
@@ -462,16 +563,27 @@ prompt review_user_gpt:
 
   Spot-check budget: `tool_max_steps: 25`. Trust the manifest by
   default; bulk-confirm based on the manifest's evidence alone.
+  CRITICAL — re-litigation costs the streak. If a candidate id
+  appears in `input.cumulative_dismissed_drift_ids` or its blocker
+  appears in `input.cumulative_pushback`, the default is DISMISS
+  without spending a tool call.
 
   Output schema (verdict_output):
-   - approved: bool — true ONLY when blockers == [] AND
-     coverage_pct >= coverage_target_pct
+   - approved: bool — true when blockers == [] AND (coverage_pct
+     >= coverage_target_pct OR the residual drift candidates are
+     all judged non-actionable per rule 6a)
    - family: "gpt"
    - blockers: structured mismatch objects
    - blocker_count: int == len(blockers)
    - fix_plan: concrete instruction set for the fixer (short)
    - confidence: "low" / "medium" / "high"
    - scanned_areas: distinct paths/areas you investigated
+   - audited_drift_ids: list of `id` values from decision_drift /
+     adr_orphans you adjudicated this iter (any disposition).
+     When blockers is empty, these ids are folded into
+     cumulative_dismissed_drift_ids per rule 7a — use the
+     candidate's stable id (e.g. "drift-045", "orphan-NNN");
+     never invent ids.
 
 prompt fix_system:
   You are the fixer for the `adr-cartograph` (Adry) workflow.
@@ -740,6 +852,11 @@ schema build_manifest_output:
   coverage_pct: int
 
 ## review_input: the bounded shape the reviewers receive.
+##
+## v0.2.0 (asymptote-hardening): added cumulative_dismissed_drift_ids
+## + cumulative_pushback so reviewers see the cross-family
+## already-adjudicated set every iter and stop re-judging the same
+## candidates round after round (Doki-style do-not-relitigate).
 schema review_input:
   total_adrs: int
   total_decisions: int
@@ -758,11 +875,26 @@ schema review_input:
   prior_pushback_justification: string
   prior_code_files_touched: string[]
   cumulative_chronic_paths: string[]
+  ## v0.2.0: every drift/orphan id a prior reviewer (any family)
+  ## adjudicated WHILE raising zero blockers — the cumulative
+  ## cross-family "not actionable" set. Reviewer rule: dismiss on
+  ## sight unless you have NEW evidence the prior pass missed.
+  cumulative_dismissed_drift_ids: string[]
+  ## v0.2.0: every blocker the fixer pushed back across the run
+  ## (union, both families). Reviewer rule: do NOT re-raise unless
+  ## you can rebut the fixer's justification with new evidence.
+  cumulative_pushback: string[]
 
 ## verdict_output: blockers field stays json (the DSL schema
 ## parser does not support nested object arrays). blocker_count
 ## is the explicit count so the streak gate can fire on
 ## "0 blockers" even when the reviewer soft-rejects.
+##
+## v0.2.0: audited_drift_ids — list the `id` of every drift /
+## orphan candidate you adjudicated this iter (whether you
+## confirmed or dismissed it). When you raise zero blockers, the
+## streak_check folds these into cumulative_dismissed_drift_ids so
+## the cross-family next reviewer can dismiss them on sight.
 schema verdict_output:
   approved: bool
   family: string [enum: "claude", "gpt"]
@@ -771,9 +903,16 @@ schema verdict_output:
   fix_plan: string
   confidence: string [enum: "low", "medium", "high"]
   scanned_areas: string[]
+  audited_drift_ids: string[]
 
 ## streak_state: cross-family streak tracker + revert history
 ## fed back into enforce_fix_scope.
+##
+## v0.2.0 (asymptote-hardening): carry the current reviewer's
+## `confidence` AND the two do-not-relitigate accumulators
+## (cumulative_dismissed_drift_ids, cumulative_pushback) so the
+## next cross-family reviewer can dismiss already-settled items
+## on sight rather than re-judging them every round.
 schema streak_state:
   stop: bool
   approved: bool
@@ -781,10 +920,21 @@ schema streak_state:
   blockers: json
   blocker_count: int
   fix_plan: string
+  ## v0.2.0: surface the current reviewer's confidence into
+  ## streak_state so the NEXT iter sees it via
+  ## `loop.review_loop.previous_output.confidence` and can
+  ## calibrate the monotonic-trend rule (high-conf rejection
+  ## followed by a fix should expect ≤N residual blockers;
+  ## intuition-level low-conf is non-blocking).
+  confidence: string
   coverage_pct: int
   cumulative_reverted_paths: string[]
   cumulative_chronic_paths: string[]
   cumulative_declared_paths: string[]
+  ## v0.2.0 do-not-relitigate accumulators. See review_input
+  ## comments for the dismissal contract.
+  cumulative_dismissed_drift_ids: string[]
+  cumulative_pushback: string[]
 
 schema fix_input:
   blockers: json
@@ -1181,9 +1331,28 @@ judge reviewer_gpt:
 ## Deterministic streak detector + coverage gate.
 ##
 ## stop=true iff (cross-family double approval) AND
-## (coverage_pct >= coverage_target_pct). Soft-approval
-## (low-confidence rejection) is passed through as `approved`
-## for routing but the streak still requires a hard approval.
+## (coverage gate met). Soft-approval (low-confidence rejection,
+## or rejection with blocker_count==0 = phantom rejection) is
+## passed through as `approved` for routing but the streak still
+## requires a hard approval.
+##
+## Coverage gate (v0.2.0 — asymptote-hardening): in addition to
+## the standard `coverage_pct >= coverage_target_pct` gate, fire
+## stop when BOTH families have raised zero blockers on the last
+## two iterations (cross-family steady-state). Rationale: once
+## review_user→reviewer→fix has run once and the fixer has
+## authored every ADR the reviewers will accept, `build_manifest`
+## may still report residual `decision_drift_count > 0` for
+## candidates the cross-family review jointly considers
+## non-actionable (mechanic, already-covered, no-real-alternative).
+## In that case `coverage_pct` is structurally pinned below the
+## threshold; without the steady-state escape the loop exhausts
+## review_loop(10) and falls through to `fail`, masquerading a
+## converged-but-imperfect audit as a non-convergence — which is
+## the exact 2026-06-23 opus run failure. The escape requires
+## cross-family agreement (current + previous, different families,
+## BOTH blocker_count==0); it can NEVER fire on the high-
+## confidence/20-blocker rejection that opens the run.
 ##
 ## blocker_count == 0 is treated as effective approval so a
 ## "nothing to fix, low-confidence" verdict from both families
@@ -1191,16 +1360,37 @@ judge reviewer_gpt:
 compute streak_check:
   output: streak_state
   expr:
-    stop: "(input.approved || input.blocker_count == 0 || input.confidence == 'low') && (loop.review_loop.previous_output.approved || loop.review_loop.previous_output.blocker_count == 0 || loop.review_loop.previous_output.confidence == 'low') && input.family != loop.review_loop.previous_output.family && outputs.build_manifest.coverage_pct >= vars.coverage_target_pct"
+    stop: "(input.approved || input.blocker_count == 0 || input.confidence == 'low') && (loop.review_loop.previous_output.approved || loop.review_loop.previous_output.blocker_count == 0 || loop.review_loop.previous_output.confidence == 'low') && input.family != loop.review_loop.previous_output.family && (outputs.build_manifest.coverage_pct >= vars.coverage_target_pct || (input.blocker_count == 0 && loop.review_loop.previous_output.blocker_count == 0))"
     approved: "input.approved || input.confidence == 'low' || input.blocker_count == 0"
     family: "input.family"
     blockers: "input.blockers"
     blocker_count: "input.blocker_count"
     fix_plan: "input.fix_plan"
+    ## v0.2.0: carry confidence so cross-family next iter sees it
+    ## via loop.review_loop.previous_output.confidence.
+    confidence: "input.confidence"
     coverage_pct: "outputs.build_manifest.coverage_pct"
     cumulative_reverted_paths: "concat(outputs.streak_check.cumulative_reverted_paths, input.enforce_reverted_paths)"
     cumulative_chronic_paths: "unique(concat(outputs.streak_check.cumulative_chronic_paths, input.enforce_chronic_paths))"
     cumulative_declared_paths: "unique(concat(outputs.streak_check.cumulative_declared_paths, input.enforce_declared_iter))"
+    ## v0.2.0 do-not-relitigate accumulator: when the current
+    ## reviewer raised ZERO blockers, EVERY drift id in its
+    ## audited_drift_ids is a cross-family-adjudicated not-drift
+    ## item. Union it into the cumulative dismissed set so
+    ## subsequent reviewers can dismiss them on sight (the manifest
+    ## re-emits the same candidates every iter; this is what stops
+    ## re-judging them). When blockers > 0, no contribution (the
+    ## reviewer DID raise issues this iter; audited_drift_ids
+    ## contains both confirmed and dismissed items intermixed and
+    ## we cannot separate them in the DSL).
+    cumulative_dismissed_drift_ids: "if(input.blocker_count == 0, unique(concat(outputs.streak_check.cumulative_dismissed_drift_ids, input.audited_drift_ids)), outputs.streak_check.cumulative_dismissed_drift_ids)"
+    ## v0.2.0 do-not-relitigate accumulator (fixer-side): union
+    ## every fixer pushback across both families into the cumulative
+    ## set. Routed forward to both reviewers as `cumulative_pushback`.
+    ## Reviewer rule: do NOT re-raise a previously-pushed-back
+    ## blocker without new evidence rebutting the fixer's
+    ## justification.
+    cumulative_pushback: "unique(concat(outputs.streak_check.cumulative_pushback, outputs.fix_claude.pushback, outputs.fix_gpt.pushback))"
 
 agent fix_claude:
   backend: "claude_code"
@@ -1435,7 +1625,10 @@ workflow adr_cartograph:
     prior_pushback: "{{outputs.fix_gpt.pushback}}",
     prior_pushback_justification: "{{outputs.fix_gpt.pushback_justification}}",
     prior_code_files_touched: "{{outputs.fix_claude.code_files_touched}}",
-    cumulative_chronic_paths: "{{outputs.streak_check.cumulative_chronic_paths}}"
+    cumulative_chronic_paths: "{{outputs.streak_check.cumulative_chronic_paths}}",
+    ## v0.2.0 do-not-relitigate inputs (cumulative across the run).
+    cumulative_dismissed_drift_ids: "{{outputs.streak_check.cumulative_dismissed_drift_ids}}",
+    cumulative_pushback: "{{outputs.streak_check.cumulative_pushback}}"
   }
   alt -> reviewer_gpt with {
     total_adrs: "{{outputs.build_manifest.total_adrs}}",
@@ -1452,7 +1645,10 @@ workflow adr_cartograph:
     prior_pushback: "{{outputs.fix_claude.pushback}}",
     prior_pushback_justification: "{{outputs.fix_claude.pushback_justification}}",
     prior_code_files_touched: "{{outputs.fix_gpt.code_files_touched}}",
-    cumulative_chronic_paths: "{{outputs.streak_check.cumulative_chronic_paths}}"
+    cumulative_chronic_paths: "{{outputs.streak_check.cumulative_chronic_paths}}",
+    ## v0.2.0 do-not-relitigate inputs (cumulative across the run).
+    cumulative_dismissed_drift_ids: "{{outputs.streak_check.cumulative_dismissed_drift_ids}}",
+    cumulative_pushback: "{{outputs.streak_check.cumulative_pushback}}"
   }
 
   reviewer_claude -> streak_check as review_loop(10) with {
@@ -1462,6 +1658,10 @@ workflow adr_cartograph:
     blocker_count: "{{outputs.reviewer_claude.blocker_count}}",
     fix_plan: "{{outputs.reviewer_claude.fix_plan}}",
     confidence: "{{outputs.reviewer_claude.confidence}}",
+    ## v0.2.0: ids the reviewer adjudicated this iter — folded into
+    ## cumulative_dismissed_drift_ids by streak_check when
+    ## blocker_count==0 (the cross-family "not actionable" set).
+    audited_drift_ids: "{{outputs.reviewer_claude.audited_drift_ids}}",
     enforce_reverted_paths: "{{outputs.enforce_fix_scope.reverted_paths}}",
     enforce_chronic_paths: "{{outputs.enforce_fix_scope.chronic_paths}}",
     enforce_declared_iter: "{{outputs.enforce_fix_scope.declared_iter}}"
@@ -1473,6 +1673,9 @@ workflow adr_cartograph:
     blocker_count: "{{outputs.reviewer_gpt.blocker_count}}",
     fix_plan: "{{outputs.reviewer_gpt.fix_plan}}",
     confidence: "{{outputs.reviewer_gpt.confidence}}",
+    ## v0.2.0: ids the reviewer adjudicated this iter — see edge
+    ## above for the streak_check accumulation rule.
+    audited_drift_ids: "{{outputs.reviewer_gpt.audited_drift_ids}}",
     enforce_reverted_paths: "{{outputs.enforce_fix_scope.reverted_paths}}",
     enforce_chronic_paths: "{{outputs.enforce_fix_scope.chronic_paths}}",
     enforce_declared_iter: "{{outputs.enforce_fix_scope.declared_iter}}"
