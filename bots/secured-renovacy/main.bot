@@ -2787,7 +2787,7 @@ tool prepare_commit:
     //    universal cache-dir set — Go (`go/`), Rust (`target/`,
     //    `.cargo/`), Node (`node_modules/`, `.yarn/cache`), Python
     //    (`__pycache__/`, `.venv/`, `venv/`), generic (`.cache/`,
-    //    `.iterion/`). `git ls-files --others -- ':!go' ':!.cache' …`
+    //    `.iterion/`). `git ls-files --others -- ':(exclude)go' ':(exclude).cache' …`
     //    filters at the git layer (cheap) BEFORE Node sees the bytes.
     //
     // 3. JS-side belt-and-suspenders — even with both above, scan each
@@ -2795,11 +2795,11 @@ tool prepare_commit:
     //    Costs ~µs per line; protects against a future cache dir we
     //    haven't enumerated yet.
     const EXCLUDES = [
-      ":!go", ":!target", ":!.cargo",
-      ":!node_modules", ":!.yarn/cache", ":!.yarn/unplugged", ":!.yarn/install-state.gz",
-      ":!__pycache__", ":!.venv", ":!venv",
-      ":!.cache", ":!.iterion",
-      ":!**/node_modules", ":!**/__pycache__", ":!**/.venv",
+      ":(exclude)go", ":(exclude)target", ":(exclude).cargo",
+      ":(exclude)node_modules", ":(exclude).yarn/cache", ":(exclude).yarn/unplugged", ":(exclude).yarn/install-state.gz",
+      ":(exclude)__pycache__", ":(exclude).venv", ":(exclude)venv",
+      ":(exclude).cache", ":(exclude).iterion",
+      ":(exclude)**/node_modules", ":(exclude)**/__pycache__", ":(exclude)**/.venv",
     ];
     const PATHSPEC = EXCLUDES.join(" ");
     const EXEC_OPTS = { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 };
@@ -2916,8 +2916,8 @@ fi
 # NOT be enumerated here — a bare git-add-all would stage millions
 # of untracked cache files. The exclude list mirrors prepare_commit
 # JS tool's universal cache-dir set.
-if git status --porcelain -- . ':!go' ':!target' ':!.cargo' ':!node_modules' ':!.yarn/cache' ':!.yarn/unplugged' ':!.yarn/install-state.gz' ':!__pycache__' ':!.venv' ':!venv' ':!.cache' ':!.iterion' | grep -q .; then
-  git add -A -- . ':!go' ':!target' ':!.cargo' ':!node_modules' ':!.yarn/cache' ':!.yarn/unplugged' ':!.yarn/install-state.gz' ':!__pycache__' ':!.venv' ':!venv' ':!.cache' ':!.iterion' >&2
+if git status --porcelain -- . ':(exclude)go' ':(exclude)target' ':(exclude).cargo' ':(exclude)node_modules' ':(exclude).yarn/cache' ':(exclude).yarn/unplugged' ':(exclude).yarn/install-state.gz' ':(exclude)__pycache__' ':(exclude).venv' ':(exclude)venv' ':(exclude).cache' ':(exclude).iterion' | grep -q .; then
+  git add -A -- . ':(exclude)go' ':(exclude)target' ':(exclude).cargo' ':(exclude)node_modules' ':(exclude).yarn/cache' ':(exclude).yarn/unplugged' ':(exclude).yarn/install-state.gz' ':(exclude)__pycache__' ':(exclude).venv' ':(exclude)venv' ':(exclude).cache' ':(exclude).iterion' >&2
   if ! git diff --cached --quiet; then
     if ! git commit --amend --no-edit >&2; then
       printf '{"success":false,"output":"git commit --amend failed","sha":""}\n'
@@ -3115,7 +3115,7 @@ tool review_commit_auto:
   command: `set -euo pipefail
 cd {{input.workspace_dir}} >&2
 # Cache-exclusion pathspecs (see commit_changes for rationale).
-git add -A -- . ':!go' ':!target' ':!.cargo' ':!node_modules' ':!.yarn/cache' ':!.yarn/unplugged' ':!.yarn/install-state.gz' ':!__pycache__' ':!.venv' ':!venv' ':!.cache' ':!.iterion' >&2
+git add -A -- . ':(exclude)go' ':(exclude)target' ':(exclude).cargo' ':(exclude)node_modules' ':(exclude).yarn/cache' ':(exclude).yarn/unplugged' ':(exclude).yarn/install-state.gz' ':(exclude)__pycache__' ':(exclude).venv' ':(exclude)venv' ':(exclude).cache' ':(exclude).iterion' >&2
 if git diff --cached --quiet; then
   printf '{"success":true,"output":"no review fix changes"}\n'
 else
@@ -3591,7 +3591,7 @@ SUBJECT="chore(deps): batch update ${COUNT} patch upgrades"
 # Cache-exclusion pathspecs (see commit_changes for rationale): keep
 # any stray toolchain cache OUT of the staged set, regardless of
 # whether the sandbox env block was correctly applied upstream.
-git add -A -- . ':!go' ':!target' ':!.cargo' ':!node_modules' ':!.yarn/cache' ':!.yarn/unplugged' ':!.yarn/install-state.gz' ':!__pycache__' ':!.venv' ':!venv' ':!.cache' ':!.iterion' >&2
+git add -A -- . ':(exclude)go' ':(exclude)target' ':(exclude).cargo' ':(exclude)node_modules' ':(exclude).yarn/cache' ':(exclude).yarn/unplugged' ':(exclude).yarn/install-state.gz' ':(exclude)__pycache__' ':(exclude).venv' ':(exclude)venv' ':(exclude).cache' ':(exclude).iterion' >&2
 if git diff --cached --quiet; then
   # yarn up resolved nothing (everything already at target). Soft
   # success: downstream routes to select_candidate via "not committed".
@@ -3996,7 +3996,7 @@ COUNT=$(printf '%s' "$MEMBERS" | jq 'length' 2>/dev/null || echo '?')
 BODY=$(printf '%s' "$MEMBERS" | jq -r '.[] | "- \(.name // "?") \(.current // "?") -> \(.target // "?")"' 2>/dev/null || true)
 SUBJECT="chore(deps): update ${FAMILY}/* family (${COUNT} packages)"
 # Cache-exclusion pathspecs (see commit_changes for rationale).
-git add -A -- . ':!go' ':!target' ':!.cargo' ':!node_modules' ':!.yarn/cache' ':!.yarn/unplugged' ':!.yarn/install-state.gz' ':!__pycache__' ':!.venv' ':!venv' ':!.cache' ':!.iterion' >&2
+git add -A -- . ':(exclude)go' ':(exclude)target' ':(exclude).cargo' ':(exclude)node_modules' ':(exclude).yarn/cache' ':(exclude).yarn/unplugged' ':(exclude).yarn/install-state.gz' ':(exclude)__pycache__' ':(exclude).venv' ':(exclude)venv' ':(exclude).cache' ':(exclude).iterion' >&2
 if git diff --cached --quiet; then
   printf '{"success":true,"committed":false,"output":"family yarn up produced no manifest changes","sha":""}\n'
   exit 0
