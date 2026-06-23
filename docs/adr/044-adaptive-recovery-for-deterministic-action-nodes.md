@@ -95,3 +95,71 @@ fewer hard blocks on unanticipated inputs — *without* weakening the anti-faça
 guarantees. Cost: a recovery agent invocation on the rare failure path, and a new
 DSL surface (`on_error:` / failure-semantics) to design carefully so it can't be
 abused to paper over a real gate failure (recovery is for actions, never gates).
+
+## Synthesis — the "Verified Action" pattern (mix, don't choose)
+
+The five approaches are **not alternatives; they are layers that compose**, and
+they sit at different levels:
+
+- **D (robust primitives)** = the foundation (fewer edge cases become failures).
+- **A (deterministic postcondition)** = the load-bearing spine (the truth oracle).
+- **C (self-repair) then B (agent recovery)** = graduated recovery rungs.
+- **E (failure semantics)** = the policy that bounds it.
+
+The load-bearing insight: **A is what makes B and C safe.** On their own, an LLM
+recovery / self-repair reintroduces the façade risk (the model can *claim* it
+committed). With a cheap deterministic postcondition checked after *every* rung,
+adaptive recovery becomes trustworthy — the agent cannot fake success past a
+property check. So A is not "one option among five"; it is the enabler that lets
+you mix in the adaptive ones without losing the anti-Goodhart guarantee.
+
+### The unifying model
+
+Every node becomes a quad: **goal + recipe + postcondition + policy.**
+- `goal` — the outcome, in words (fuel for the agent rungs).
+- `recipe` — the deterministic command (the fast path; what self-repair fixes).
+- `postcondition` — a cheap deterministic property check (the single source of truth).
+- `policy` — `required | recover | best_effort`.
+
+Runtime escalation (cheapest → most adaptive, postcondition is truth at each rung):
+1. **Idempotent skip** — postcondition already met? do nothing (resume-safe).
+2. **Recipe** (robust primitive). Postcondition met → done. *(the ~95% path)*
+3. **Self-repair (C)** — LLM proposes a *corrected recipe* from the error; re-run
+   deterministically, bounded. Postcondition met → done. *(auditable: the fixed
+   command is in the events; no blind side effect)*
+4. **Agent recovery (B)** — agent achieves the `goal` with real tools, bounded.
+   Postcondition met → done.
+5. **Policy (E)** — still unmet: `required`→fail, `best_effort`→warn+continue.
+
+### Why this is the most robust + flexible + clean + universal
+
+- **Universal** — the quad subsumes *every* node type as a degenerate case:
+  - a **gate** = `recipe == postcondition`, no rungs 3–4, `policy: required`
+    (pure determinism — the Goodhart firewall, unchanged);
+  - a **transform/compute** = recipe + schema-as-postcondition + self-repair;
+  - a **side-effecting action** (commit, file write, scanner) = full escalation;
+  - even an **LLM node** = the agent *is* the recipe, schema *is* the
+    postcondition — which is exactly what the review judges and sec-audit's
+    missing-field retry already do. One model for the whole graph.
+- **Robust** — *postcondition-as-truth, not exit-code-as-truth.* Exit codes lie
+  (`nothing to commit` exits 1 though the goal may be met; a command can exit 0
+  yet not achieve the outcome). Keying success on the postcondition + the
+  idempotent skip makes retries/resumes naturally correct. Both Renovacy failures
+  this session were "recipe almost right" → caught at rung 3 with zero human/code.
+- **Flexible** — authors opt into exactly the rungs they want; a bot can ship
+  recipe-only (today's behaviour) and add a postcondition later, then recovery.
+- **Clean** — one mental model (generate → verify) for the entire engine.
+
+### The deepest framing
+
+iterion is *already* "adaptive generate + deterministic verify" — that is what a
+review loop is (agent generates, judges + gates verify). Action nodes are the
+**lone exception**: deterministic generate, *no* verify → brittle and unguarded.
+This pattern simply brings action nodes onto the same spine the rest of the engine
+already runs on. The synergy isn't five features bolted together; it's making one
+existing principle universal.
+
+Recommended first cut: implement A+E as the spine (postcondition + policy on action
+nodes), add C (self-repair) as the cheap first recovery rung, B (agent) as the
+opt-in second rung, and grow D (primitives) for the operations that keep breaking
+(commit-with-cache-exclusion first). Prototype on the commit node.
