@@ -1,6 +1,6 @@
 name: docs-refresh
 display_name: Doki
-version: 0.14.0
+version: 0.17.0
 description: |
   Documentation refresh bot. Detects mismatches between project
   documentation (README, docs/*.md, CLAUDE.md, bundled skills,

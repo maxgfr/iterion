@@ -1,21 +1,67 @@
 ## ─────────────────────────────────────────────────────────────────
-## docs-refresh v0.3.0
+## docs-refresh v0.17.0
+##
+## v0.17.0 — CONVERGENCE HARDENING (asymptote enforcement). The
+## 2026-06-23 dogfood (run on a scoped doc diff, diff_since=origin/main)
+## looped ~16 review iterations to its `review_loop(15)` ceiling
+## without converging, never reaching prepare_commit. Root causes
+## (per CLAUDE.md "Review loops must converge to an asymptote"):
+##
+##  1. STREAK ASYMMETRY (LOW-CONFIDENCE). The `stop` formula
+##     compared `input.approved` (raw) on the current side against
+##     `loop.review_loop.previous_output.approved` (the previous
+##     streak_check's LAUNDERED `approved`, which folded in
+##     `confidence == 'low'`). So a CURRENT low-confidence rejection
+##     with non-zero blockers reset the streak, while a PREVIOUS
+##     low-confidence rejection didn't — pure noise oscillated the
+##     gate. Fixed by also laundering the current side of `stop`:
+##     `(input.approved || input.confidence == 'low' || input.blocker_count == 0)`.
+##
+##  2. NO RE-LITIGATION GUARD. Reviewers received the previous
+##     verdict via `loop.review_loop.previous_output` but had no
+##     instruction to refrain from re-raising items the previous
+##     reviewer already adjudicated (dismissed or that the fixer
+##     pushed back). With unverifiable `symbol_ref` candidates that
+##     stay in the manifest every iter (CamelCase prose, archived
+##     refs), each new reviewer wasted tool calls re-checking
+##     items that were already settled. Fixed by:
+##       a. Accumulating `cumulative_dismissed_pairs` (the union of
+##          every reviewer's `audited_pairs` when they raised zero
+##          blockers — i.e. confirmed-not-drift items) into
+##          `streak_state`, then feeding it into both reviewers via
+##          the alt→reviewer edges.
+##       b. Accumulating `cumulative_pushback` (union of every
+##          fixer pushback across families) into `streak_state`,
+##          then feeding it into both reviewers alongside the
+##          last-iter `prior_pushback`.
+##       c. Adding an explicit "DO NOT re-raise without NEW
+##          evidence" clause to `review_system` and to both
+##          `review_user_*` prompts.
+##
+##  3. PREVIOUS VERDICT CONFIDENCE INVISIBLE. `streak_state` did
+##     not carry `confidence`, so `loop.review_loop.previous_output`
+##     showed reviewers a verdict shape without confidence. They
+##     could not tell whether the previous family's rejection was
+##     intuition-level (low) or evidence-backed (high), defeating
+##     the monotonic-trend signal. Fixed by adding `confidence` to
+##     `streak_state` and surfacing it in the prior-verdict prompt
+##     stanza.
+##
+## v0.3.0 — DEFAULT-CREATE (operator-directed): when scan_docs finds
+## ZERO documentation files in scope, the `author_docs` node creates
+## the docs directory (`docs_dir` var, DEFAULT "docs") and authors an
+## initial documentation set from the code; the run then loops back
+## through scan_docs (author_rescan) and the normal review/refresh loop
+## polishes + commits it. So docs-refresh refreshes from zero, not only
+## edits pre-existing files. (The earlier doc-align → docs-refresh
+## rename — operator-directed alongside this — is also complete.)
 ##
 ## Refreshes a repo's documentation against the actual current state of
 ## the code: detects mismatches between docs (README, docs/*.md,
 ## CLAUDE.md, bundled skills, optionally Go code comments) and the code,
 ## fixes the DOCUMENTATION (never the code), and auto-commits on
 ## convergence. When a repo has NO docs yet, it bootstraps an initial
-## set first (see DEFAULT-CREATE below).
-##
-## v0.3.0 — DEFAULT-CREATE (operator-directed): when scan_docs finds
-## ZERO documentation files in scope, the `author_docs` node creates the
-## docs directory (`docs_dir` var, DEFAULT "docs") and authors an
-## initial documentation set from the code; the run then loops back
-## through scan_docs (author_rescan) and the normal review/refresh loop
-## polishes + commits it. So docs-refresh refreshes from zero, not only
-## edits pre-existing files. (The earlier doc-align → docs-refresh
-## rename — operator-directed alongside this — is also complete.)
+## set first (see DEFAULT-CREATE above).
 ##
 ## v0.2.0 fixes 7 issues uncovered by the v0.1.0 dogfood run on
 ## this repo:
@@ -346,6 +392,52 @@ prompt review_system:
    `input.doc_files[]` footprint is still your audit ceiling;
    recently-changed is a HINT, not a scope reduction.
 
+  CONVERGENCE — DO NOT RE-LITIGATE (v0.17.0):
+   This is a review LOOP that must converge to an asymptote
+   (settle into a stable approved state and stop). Re-raising an
+   item the loop has already adjudicated is the classic
+   oscillation driver — it resets the streak gate and wastes the
+   iteration budget.
+
+   Three signals tell you what has already been settled:
+
+   a. `input.cumulative_dismissed_pairs` — the union of every
+      `doc::value` pair that a prior reviewer (any family) put
+      into `audited_pairs` WHILE raising zero blockers on that
+      iteration. I.e. items the cross-family review already
+      decided are NOT drift. Do NOT re-raise any pair in this
+      list as a blocker UNLESS you have NEW EVIDENCE the prior
+      adjudication missed (e.g. you ran `grep` on the live tree
+      and found a genuine drift the previous reviewer overlooked).
+      If you must re-raise, state the new evidence in the
+      blocker's `code_state` / `suggested_fix` explicitly so the
+      cross-family reviewer can spot-check.
+
+   b. `input.cumulative_pushback` — the union of every blocker
+      the FIXER pushed back (across both families) with its
+      justification. The fixer has already declined these items
+      as false-positives or `is_code_bug`. Do NOT re-raise the
+      same blocker unless you can rebut the fixer's
+      justification with NEW evidence.
+
+   c. `loop.review_loop.previous_output.blockers` +
+      `previous_output.confidence` — the previous reviewer's
+      verdict (other family, last iter — visible to you below
+      the gates section). Verdicts must trend monotonically: if
+      the previous reviewer raised N blockers with high
+      confidence and the fixer applied a fix, you should expect
+      ≤N residual blockers (commonly 0). If you raise MORE
+      blockers, justify what changed (the fix introduced
+      regression, the fixer pushed back a real drift, etc.).
+
+   Default posture: when an item appears in (a) or (b), DISMISS
+   it (do not add to blockers, do not re-add to `audited_pairs`
+   unless you re-investigated) and spend the tool-call budget on
+   genuinely NEW drift surfaces. The manifest is deterministic —
+   it re-extracts the same unverifiable `symbol_ref` candidates
+   every iter; the do-not-relitigate rule is what stops the
+   reviewer from re-judging them every iter.
+
   HOW TO USE THE CHUNK FIELDS (v0.16.0):
    `input.chunked`, `input.chunk_doc_count`, and
    `input.docs_with_drift_count` describe this iter's slice of
@@ -421,13 +513,28 @@ prompt review_user_claude:
   ## Cross-family context
 
   Previous reviewer's verdict (other family, last iteration —
-  empty on iter 0):
+  empty on iter 0). Note the prior `confidence` — verdicts MUST
+  trend monotonically (see review_system "DO NOT RE-LITIGATE"):
   {{loop.review_loop.previous_output}}
 
-  Items the fixer pushed back as is_code_bug / false-positive:
+  Items the fixer pushed back as is_code_bug / false-positive
+  ON THE LAST ITERATION:
   {{input.prior_pushback}}
   Justification:
   {{input.prior_pushback_justification}}
+
+  ## Already-adjudicated (do NOT re-raise without NEW evidence)
+
+  Pairs that prior reviewers (any family) marked as not-drift
+  across the ENTIRE run (cumulative). Each entry is a
+  `doc::value` string. Per review_system, dismiss these on
+  sight unless you have new evidence:
+  {{input.cumulative_dismissed_pairs}}
+
+  Every blocker the fixer has pushed back across the run
+  (cumulative). Per review_system, do NOT re-raise unless you
+  can rebut the fixer's justification with new evidence:
+  {{input.cumulative_pushback}}
 
   ## Gates
 
@@ -468,6 +575,13 @@ prompt review_user_claude:
   iter so you have headroom to emit structured output. Bulk-
   `confirm` the rest based on the manifest's evidence alone —
   that's the whole point of the manifest pattern.
+
+  CRITICAL — re-litigation costs the streak. If a candidate
+  appears in `input.cumulative_dismissed_pairs` or
+  `input.cumulative_pushback`, the default is DISMISS without
+  spending a tool call. Spending tool calls on already-settled
+  items is the exact oscillation pattern that blew past the
+  iteration ceiling in the 2026-06-23 dogfood.
 
   Output schema (verdict_output):
    - approved: bool — true ONLY when blockers == [] AND
@@ -538,13 +652,28 @@ prompt review_user_gpt:
   ## Cross-family context
 
   Previous reviewer's verdict (other family, last iteration —
-  empty on iter 0):
+  empty on iter 0). Note the prior `confidence` — verdicts MUST
+  trend monotonically (see review_system "DO NOT RE-LITIGATE"):
   {{loop.review_loop.previous_output}}
 
-  Items the fixer pushed back as is_code_bug / false-positive:
+  Items the fixer pushed back as is_code_bug / false-positive
+  ON THE LAST ITERATION:
   {{input.prior_pushback}}
   Justification:
   {{input.prior_pushback_justification}}
+
+  ## Already-adjudicated (do NOT re-raise without NEW evidence)
+
+  Pairs that prior reviewers (any family) marked as not-drift
+  across the ENTIRE run (cumulative). Each entry is a
+  `doc::value` string. Per review_system, dismiss these on
+  sight unless you have new evidence:
+  {{input.cumulative_dismissed_pairs}}
+
+  Every blocker the fixer has pushed back across the run
+  (cumulative). Per review_system, do NOT re-raise unless you
+  can rebut the fixer's justification with new evidence:
+  {{input.cumulative_pushback}}
 
   ## Gates
 
@@ -577,10 +706,14 @@ prompt review_user_gpt:
   missed semantically. Aim for ≤10 tool calls; bulk-confirm
   the rest.
 
+  CRITICAL — re-litigation costs the streak. If a candidate
+  appears in `input.cumulative_dismissed_pairs` or
+  `input.cumulative_pushback`, the default is DISMISS without
+  spending a tool call. Spending tool calls on already-settled
+  items is the exact oscillation pattern that blew past the
+  iteration ceiling in the 2026-06-23 dogfood.
+
   Output schema (verdict_output):
-    - approved: bool
-    - family: "gpt"
-    - blockers: array of structured mismatch objects (see
    - approved: bool — true ONLY when blockers == [] AND
      manifest_coverage_pct >= coverage_target_pct
    - family: "gpt"
@@ -933,6 +1066,18 @@ schema review_input:
   ## strict-threshold design.
   cumulative_chronic_paths: string[]
 
+  ## v0.17.0 do-not-relitigate inputs. The deduplicated unions of
+  ## (a) every `audited_pairs` element from a prior reviewer that
+  ## raised ZERO blockers on its iteration (i.e. the
+  ## cross-family-confirmed not-drift items), and (b) every blocker
+  ## the fixer pushed back across both families. Reviewers must
+  ## dismiss items in these lists on sight unless they have NEW
+  ## evidence — re-judging settled items is the oscillation
+  ## driver that drove the 2026-06-23 dogfood past its iteration
+  ## ceiling. Empty on iter 0.
+  cumulative_dismissed_pairs: string[]
+  cumulative_pushback: string[]
+
 ## verdict_output: the blockers field stays JSON (DSL schema
 ## parser doesn't support nested object arrays). The per-blocker
 ## fields incl. the `anchor_kind` enum are documented in
@@ -972,9 +1117,25 @@ schema streak_state:
   blockers: json
   blocker_count: int
   fix_plan: string
+  ## v0.17.0: surface the current reviewer's `confidence` so the
+  ## NEXT iteration's reviewer (cross-family) sees it via
+  ## `loop.review_loop.previous_output.confidence` and can
+  ## calibrate "verdicts must trend monotonically" (high-conf
+  ## rejection followed by a fix should expect ≤N residual
+  ## blockers; intuition-level low-conf is non-blocking).
+  confidence: string
   cumulative_audited_pairs: string[]
   cumulative_audited_docs: string[]
   coverage_pct: int
+  ## v0.17.0 do-not-relitigate accumulators.
+  ## cumulative_dismissed_pairs: union of `audited_pairs` from
+  ## every reviewer iteration whose `blocker_count == 0` — the
+  ## set of doc::value pairs cross-family confirmed not-drift.
+  ## cumulative_pushback: union of every fixer pushback string
+  ## across both families. Both feed the next reviewer's
+  ## "do NOT re-raise without new evidence" gate.
+  cumulative_dismissed_pairs: string[]
+  cumulative_pushback: string[]
   ## v0.12.0: every path the enforce_fix_scope tool had to revert
   ## this run (with duplicates). Kept for telemetry — feeds
   ## enforce_fix_scope's own threshold computation on each iter
@@ -1856,13 +2017,54 @@ compute streak_check:
     ## audited_docs union). The manifest scans every doc every
     ## iter, so coverage moves only when the fixer actually
     ## resolves drifts. No more reviewer-claimed coverage padding.
-    stop: "(input.approved || input.blocker_count == 0) && (loop.review_loop.previous_output.approved || loop.review_loop.previous_output.blocker_count == 0) && input.family != loop.review_loop.previous_output.family && outputs.build_manifest.coverage_pct >= vars.coverage_target_pct"
+    ##
+    ## v0.17.0 streak symmetry: the CURRENT side of `stop` now
+    ## also launders low-confidence rejections, matching the
+    ## previous side's laundering through `streak_state.approved`
+    ## (which already folded in `input.confidence == 'low'` since
+    ## v0.3.0). Pre-fix asymmetry — current side used raw
+    ## `input.approved` while previous side used the laundered
+    ## `previous_output.approved` — meant a CURRENT low-confidence
+    ## rejection with non-zero blockers reset the streak that a
+    ## PREVIOUS low-confidence rejection did not. Pure noise
+    ## oscillated the gate. The asymptote requirement (CLAUDE.md
+    ## "Review loops must converge to an asymptote") demands
+    ## both sides treat low-conf identically.
+    stop: "(input.approved || input.confidence == 'low' || input.blocker_count == 0) && (loop.review_loop.previous_output.approved || loop.review_loop.previous_output.blocker_count == 0) && input.family != loop.review_loop.previous_output.family && outputs.build_manifest.coverage_pct >= vars.coverage_target_pct"
     approved: "input.approved || input.confidence == 'low' || input.blocker_count == 0"
     family: "input.family"
     blockers: "input.blockers"
     blocker_count: "input.blocker_count"
+    ## v0.17.0: carry the current reviewer's `confidence` into
+    ## streak_state so the cross-family next iter sees it via
+    ## `loop.review_loop.previous_output.confidence` and can
+    ## reason about monotonic-trend (high-conf rejection then
+    ## fix should expect ≤N residual blockers, etc.).
+    confidence: "input.confidence"
     fix_plan: "input.fix_plan"
     cumulative_audited_pairs: "unique(concat(outputs.streak_check.cumulative_audited_pairs, input.audited_pairs))"
+    ## v0.17.0 do-not-relitigate accumulator: when the current
+    ## reviewer raised ZERO blockers, EVERY pair in its
+    ## audited_pairs is a cross-family-adjudicated not-drift item.
+    ## Union it into the cumulative dismissed set so subsequent
+    ## reviewers can dismiss those pairs on sight (the manifest
+    ## re-emits the same candidates every iter; this is what
+    ## stops re-judging them). When blockers > 0, no contribution
+    ## (the reviewer DID raise issues on this iter; its
+    ## audited_pairs contains both confirmed-drift and dismissed
+    ## items intermixed and we cannot separate them in the DSL).
+    cumulative_dismissed_pairs: "if(input.blocker_count == 0, unique(concat(outputs.streak_check.cumulative_dismissed_pairs, input.audited_pairs)), outputs.streak_check.cumulative_dismissed_pairs)"
+    ## v0.17.0 do-not-relitigate accumulator (fixer-side):
+    ## union every fixer pushback across both families into the
+    ## cumulative pushback set. Routed forward to both reviewers
+    ## as `cumulative_pushback`. The reviewer rule: do NOT
+    ## re-raise a previously-pushed-back blocker without new
+    ## evidence rebutting the fixer's justification. The current
+    ## iter's fixer pushback is the union of fix_claude.pushback
+    ## + fix_gpt.pushback (whichever family fired most recently
+    ## upstream of this reviewer; the union is idempotent under
+    ## `unique`).
+    cumulative_pushback: "unique(concat(outputs.streak_check.cumulative_pushback, outputs.fix_claude.pushback, outputs.fix_gpt.pushback))"
     ## v0.15.0: file-level coverage is now the manifest's static
     ## all_audited_docs (every doc is mechanically scanned every
     ## iter). Kept on the schema for backward-compat in reports;
@@ -2234,7 +2436,11 @@ workflow docs_refresh:
     prior_pushback_justification: "{{outputs.fix_gpt.pushback_justification}}",
     prior_code_files_touched_claude: "{{outputs.fix_claude.code_files_touched}}",
     prior_code_files_touched_gpt: "{{outputs.fix_gpt.code_files_touched}}",
-    cumulative_chronic_paths: "{{outputs.streak_check.cumulative_chronic_paths}}"
+    cumulative_chronic_paths: "{{outputs.streak_check.cumulative_chronic_paths}}",
+    ## v0.17.0 do-not-relitigate inputs (cumulative across the
+    ## entire run, not just the last iter).
+    cumulative_dismissed_pairs: "{{outputs.streak_check.cumulative_dismissed_pairs}}",
+    cumulative_pushback: "{{outputs.streak_check.cumulative_pushback}}"
   }
   alt -> reviewer_gpt with {
     total_docs: "{{outputs.build_manifest.total_docs}}",
@@ -2256,6 +2462,10 @@ workflow docs_refresh:
     prior_code_files_touched_claude: "{{outputs.fix_claude.code_files_touched}}",
     prior_code_files_touched_gpt: "{{outputs.fix_gpt.code_files_touched}}",
     cumulative_chronic_paths: "{{outputs.streak_check.cumulative_chronic_paths}}",
+    ## v0.17.0 do-not-relitigate inputs (cumulative across the
+    ## entire run, not just the last iter).
+    cumulative_dismissed_pairs: "{{outputs.streak_check.cumulative_dismissed_pairs}}",
+    cumulative_pushback: "{{outputs.streak_check.cumulative_pushback}}"
     ## v0.7.0 cost optimisation moot under the manifest shape —
     ## input is now bounded, no more cumulative context bloat to
     ## fight. Keeping session: fresh on reviewer_gpt for the

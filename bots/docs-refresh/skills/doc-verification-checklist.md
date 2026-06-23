@@ -72,6 +72,32 @@ you take action B or C, and (encouraged) when you actively
 investigated A. The cross-family reviewer's STEP-3 spot-check
 randomises 3 entries from your `audited_pairs` and re-greps them.
 
+### STEP 1.5 — Do NOT re-litigate (v0.17.0 convergence gate)
+
+BEFORE you raise any blocker, check the candidate against:
+
+- `input.cumulative_dismissed_pairs` — `doc::value` strings prior
+  reviewers (any family) adjudicated as not-drift across the run.
+- `input.cumulative_pushback` — fixer pushback descriptions across
+  both families.
+
+If the candidate appears in either, the DEFAULT action is
+**dismiss without spending a tool call**. Re-judging settled
+items is the canonical oscillation pattern — it resets the
+streak gate and burns the iteration budget without changing
+anything material. Only re-raise a settled item when:
+
+1. You ran a tool call (read_file / grep) on the LIVE worktree,
+2. The result contradicts the prior adjudication, AND
+3. You can cite the new evidence in the blocker's `code_state` /
+   `suggested_fix` (so the cross-family reviewer can re-verify).
+
+Without new evidence, dismissing is mandatory — not a courtesy.
+The 2026-06-23 dogfood ran 16 iterations to its review_loop(15)
+ceiling exactly because the manifest re-emits the same
+unverifiable `symbol_ref` candidates every iter and the reviewer
+re-judged them every iter. Don't be that reviewer.
+
 ## STEP 2 — Spot-check the top drifts
 
 Your `tool_max_steps` budget is 25 (v0.15.0). Spend it on the
