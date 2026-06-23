@@ -46,9 +46,17 @@ vars:
   workspace_dir:       string = "${PROJECT_DIR}"
   severity_threshold:  string = "medium"
   scope_notes:         string = ""
-  scan_dir:            string = "${PROJECT_DIR}/.iterion/security/scan-deps"
-  cache_dir:           string = "${HOME}/.iterion/security-cache"
-  cache_path:          string = "${HOME}/.iterion/security-cache/packages.jsonl"
+  ## Out-of-tree, sandbox-writable scratch (engine resolves
+  ## ${PROJECT_SCRATCH_DIR} to a container-writable path when sandboxed —
+  ## was ${HOME}/.iterion/security-cache + ${PROJECT_DIR}/.iterion/..., which
+  ## the sec image's pinned non-host User cannot write → update_cache EACCES;
+  ## also kept .iterion out of the target repo, per the repo-agnostic rule).
+  ## NOTE: under a sandbox this scratch is per-run (ephemeral), so the package
+  ## cache no longer dedups across runs — acceptable for the SCA scaffold; the
+  ## LLM-review pass is the value, not the cache.
+  scan_dir:            string = "${PROJECT_SCRATCH_DIR}/sec-audit-deps/scan"
+  cache_dir:           string = "${PROJECT_SCRATCH_DIR}/sec-audit-deps/cache"
+  cache_path:          string = "${PROJECT_SCRATCH_DIR}/sec-audit-deps/cache/packages.jsonl"
   scanner_version:     string = "sec-audit-deps@0.1.0"
   cache_ttl_days:      int    = 30
 

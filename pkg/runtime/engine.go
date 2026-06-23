@@ -1958,13 +1958,23 @@ func (e *Engine) resolveVars(inputs map[string]interface{}) map[string]interface
 			return memory.WorkspaceMemoryDir(base)
 		}
 		if key == "PROJECT_SCRATCH_DIR" {
-			// Out-of-tree scratch dir keyed off the run's repo_root, a
-			// sibling of PROJECT_MEMORY_DIR at ~/.iterion/projects/<key>/
-			// scratch/. For working files a bot must NOT leave in the
-			// target repo (e.g. a chunked review's per-chunk diffs) so
-			// they never pollute the worktree or the run diff. Same host
-			// path is bind-mounted inside the sandbox, so it resolves in
-			// both modes without remapping.
+			// Out-of-tree scratch dir for working files a bot must NOT leave
+			// in the target repo (e.g. a chunked review's per-chunk diffs)
+			// so they never pollute the worktree or the run diff.
+			//
+			// Sandboxed: the host ~/.iterion scratch is bind-mounted, but it
+			// is owned by the host user — container images that pin a
+			// non-host User (iterion-sandbox-sec/-full) cannot write it
+			// (observed EACCES: branch-improve-loop's plan_chunks and
+			// sec-audit-deps' update_cache). Resolve instead to the
+			// container-writable, out-of-tree /tmp (world-writable 1777,
+			// isolated per container = per run). Scratch is ephemeral working
+			// state, so not persisting it to the host path is correct.
+			if e.containerWorkspace != "" {
+				return "/tmp/iterion-scratch"
+			}
+			// Non-sandboxed: host path keyed off repo_root, a sibling of
+			// PROJECT_MEMORY_DIR at ~/.iterion/projects/<key>/scratch/.
 			base := e.repoRoot
 			if base == "" {
 				base = e.workDir
