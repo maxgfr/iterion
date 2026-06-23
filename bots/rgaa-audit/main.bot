@@ -40,9 +40,11 @@ vars:
   ## issues (severity-sorted); the rest are still summarised in the report.
   findings_cap:  int    = 80
   ## Models / effort are env-tunable so the same bot runs lean or deep.
-  detect_model:  string = "${ITERION_RGAA_MODEL_DETECT:-openai/gpt-5.5}"
-  review_model:  string = "${ITERION_RGAA_MODEL_REVIEW:-claude-opus-4-8}"
-  report_model:  string = "${ITERION_RGAA_MODEL_REPORT:-claude-opus-4-8}"
+  ## Set inline on the detect_ui / rgaa_review / report_card node `model:`
+  ## fields as `${ITERION_RGAA_MODEL_*:-default}` — the engine resolves
+  ## `${ENV:-default}` in a node's model field but NOT `{{vars.*}}` refs,
+  ## so the env expression must live directly on the node (same idiom as
+  ## `max_duration` above), not be routed through a var.
 
 ## ─── Schemas ──────────────────────────────────────────────────────────
 
@@ -312,7 +314,7 @@ print(json.dumps({'listing': listing}))
 
 agent detect_ui:
   backend: "claw"
-  model: "{{vars.detect_model}}"
+  model: "${ITERION_RGAA_MODEL_DETECT:-openai/gpt-5.5}"
   reasoning_effort: "${ITERION_RGAA_EFFORT_DETECT:-medium}"
   input: detect_ui_input
   output: ui_output
@@ -326,7 +328,7 @@ agent detect_ui:
 ## to .claude/skills/ and (when wired) the DSFR MCP tools are reachable.
 agent rgaa_review:
   backend: "claude_code"
-  model: "{{vars.review_model}}"
+  model: "${ITERION_RGAA_MODEL_REVIEW:-claude-opus-4-8}"
   reasoning_effort: "${ITERION_RGAA_EFFORT_REVIEW:-high}"
   input: review_input
   output: review_output
@@ -411,7 +413,7 @@ agent report_card:
   ## claude_code REQUIRED: needs the bundled skills mirrored to
   ## .claude/skills/ and the board MCP server with capability-gated tools.
   backend: "claude_code"
-  model: "{{vars.report_model}}"
+  model: "${ITERION_RGAA_MODEL_REPORT:-claude-opus-4-8}"
   reasoning_effort: "${ITERION_RGAA_EFFORT_REPORT:-medium}"
   input: report_input
   output: report_output
