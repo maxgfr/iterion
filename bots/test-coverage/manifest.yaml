@@ -1,0 +1,68 @@
+name: test-coverage
+display_name: Testy
+version: 0.1.0
+description: |
+  Autonomous test-coverage augmentation. Points at a target area (a
+  path, package, or free description — or nothing, in which case Testy
+  picks the lowest-coverage / most-critical / most-recently-changed
+  code itself), plans which tests are missing, writes them with the
+  repo's OWN test framework, proves they pass with a deterministic
+  gate, then runs the alternating Claude/GPT review-fix loop until two
+  consecutive cross-family approvals.
+
+  The operator chooses which test types to add via checkboxes (unit /
+  integration / e2e) plus a free-text field for any other kind
+  (property-based, contract, snapshot, smoke, performance, …). When
+  nothing is checked, Testy chooses the types that fit the code and the
+  repo's conventions.
+
+  Anti-façade by design: the success metric is NOT coverage percentage
+  — it is meaningful tests that would CATCH A REAL REGRESSION. A
+  deterministic gate proves the repo's own suite still passes and that
+  genuinely-new test code was added; the cross-family reviewers reject
+  any test that would still pass if the code under test were stubbed or
+  returned wrong values (zero-assertion tests, tautologies,
+  characterization snapshots that lock in unverified output,
+  over-mocking).
+
+  Stack-agnostic: how to detect the test runner, where tests live, and
+  how to write each test type idiomatically lives in the bot's skills,
+  not in the workflow — so adding a language needs no DSL edit.
+when_to_use: |
+  Use when a repo (or a specific area of it) is under-tested and needs
+  REAL tests added — a thin-coverage package, a critical path with no
+  tests, freshly-landed code that shipped without them. Testy writes
+  and commits the tests (semantic `test:` commit on cross-family
+  approval); it does not change product behaviour.
+
+  Do NOT use to review an existing branch/PR (that is Billy /
+  branch-improve-loop) or to build a new feature (that is Featurly /
+  feature-dev — though feature-dev already writes tests for the feature
+  it ships). Testy's job is coverage of code that already exists.
+author: SocialGouv (devthejo) — test-coverage/main.bot
+schema_version: 1
+
+triggers:
+  - test
+  - tests
+  - testing
+  - coverage
+  - test-coverage
+  - unit-test
+  - add-tests
+  - augment-tests
+
+dispatch_vars:
+  target: |-
+    {{issue.title}}
+
+    {{issue.body}}
+
+invocations:
+  - kind: command
+    mode: board
+    args_var: target
+    command: { name: testy, aliases: [test-coverage], scope: any, min_replier_role: developer }
+  - kind: board
+
+enabled: true

@@ -235,6 +235,7 @@ dispatcher routes on it), never the persona.
 | Depsy | `sec-audit-deps` |
 | Seki | `sec-audit-source` |
 | Renovacy | `secured-renovacy` |
+| Testy | `test-coverage` |
 | Nexie | `whats-next` (this bot) |
 | Willy | `whole-improve-loop` |
 
@@ -548,7 +549,7 @@ router.
   Use for a READ-ONLY supply-chain audit of installed dependencies:
   post-install triage, malware / typosquat / install-hook detection,
   CVE baseline. Emits findings to the board; does not fix.
-- **Vars**: `cache_dir` (string), `cache_path` (string), `cache_ttl_days` (int), `scan_dir` (string), `scanner_version` (string), `severity_threshold` (string), `workspace_dir` (string)
+- **Vars**: `cache_dir` (string), `cache_path` (string), `cache_ttl_days` (int), `scan_dir` (string), `scanner_version` (string), `scope_notes` (string), `severity_threshold` (string), `workspace_dir` (string)
 - **Path**: `bots/sec-audit-deps/main.bot`
 
 ### `sec-audit-source` — Seki
@@ -599,6 +600,50 @@ family approval.
   major_policy: attempt.
 - **Vars**: `fix_loop_default` (int), `fix_loop_major` (int), `major_policy` (string), `max_packages_per_run` (int), `override_install_cmd` (string), `override_upgrade_cmd` (string), `scope` (string), `update_scope` (string), `user_prompt` (string), `workspace_dir` (string)
 - **Path**: `bots/secured-renovacy/main.bot`
+
+### `test-coverage` — Testy
+
+Autonomous test-coverage augmentation. Points at a target area (a
+path, package, or free description — or nothing, in which case Testy
+picks the lowest-coverage / most-critical / most-recently-changed
+code itself), plans which tests are missing, writes them with the
+repo's OWN test framework, proves they pass with a deterministic
+gate, then runs the alternating Claude/GPT review-fix loop until two
+consecutive cross-family approvals.
+
+The operator chooses which test types to add via checkboxes (unit /
+integration / e2e) plus a free-text field for any other kind
+(property-based, contract, snapshot, smoke, performance, …). When
+nothing is checked, Testy chooses the types that fit the code and the
+repo's conventions.
+
+Anti-façade by design: the success metric is NOT coverage percentage
+— it is meaningful tests that would CATCH A REAL REGRESSION. A
+deterministic gate proves the repo's own suite still passes and that
+genuinely-new test code was added; the cross-family reviewers reject
+any test that would still pass if the code under test were stubbed or
+returned wrong values (zero-assertion tests, tautologies,
+characterization snapshots that lock in unverified output,
+over-mocking).
+
+Stack-agnostic: how to detect the test runner, where tests live, and
+how to write each test type idiomatically lives in the bot's skills,
+not in the workflow — so adding a language needs no DSL edit.
+
+- **Use when**:
+  Use when a repo (or a specific area of it) is under-tested and needs
+  REAL tests added — a thin-coverage package, a critical path with no
+  tests, freshly-landed code that shipped without them. Testy writes
+  and commits the tests (semantic `test:` commit on cross-family
+  approval); it does not change product behaviour.
+  
+  Do NOT use to review an existing branch/PR (that is Billy /
+  branch-improve-loop) or to build a new feature (that is Featurly /
+  feature-dev — though feature-dev already writes tests for the feature
+  it ships). Testy's job is coverage of code that already exists.
+- **Triggers**: test, tests, testing, coverage, test-coverage, unit-test, add-tests, augment-tests
+- **Vars**: `extra_test_kinds` (string), `target` (string), `test_e2e` (bool), `test_integration` (bool), `test_unit` (bool), `workspace_dir` (string)
+- **Path**: `bots/test-coverage/main.bot`
 
 ### `whats-next` — Nexie
 

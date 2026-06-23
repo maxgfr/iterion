@@ -58,6 +58,7 @@ first bilan for a bot lands.
 | Willy | `whole-improve-loop` | whole-repo review-fix loop | [whole-improve-loop.md](whole-improve-loop.md) |
 | Billy | `branch-improve-loop` | branch-scoped review-fix loop (commits) | [branch-improve-loop.md](branch-improve-loop.md) |
 | Featurly | `feature-dev` | one-shot feature dev + review loop | [feature-dev.md](feature-dev.md) |
+| Testy | `test-coverage` | test-coverage augmentation + anti-façade review loop | [test-coverage.md](test-coverage.md) |
 | Doki | `docs-refresh` | docs↔code convergence loop | [docs-refresh.md](docs-refresh.md) |
 | Revi | `review-pr` | read-only cross-family reviewer | [review-pr.md](review-pr.md) |
 | Revi (converse) | `revi-converse` | conversational PR follow-up | _not yet_ |

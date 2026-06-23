@@ -23,6 +23,12 @@
 .whole_improve_loop.verify.sh
 .whole_improve_loop.verify.log
 
+# test-coverage (Testy) build/test gate scratch: the agent-written verify
+# script + its captured log. Regenerable; never committed (the bot's
+# commit step also resets them out of the staged set).
+.test_coverage.verify.sh
+.test_coverage.verify.log
+
 # Sandbox runtime scratch — the container redirects HOME / XDG_CACHE_HOME
 # and the Go toolchain caches (GOPATH / GOCACHE) into the bind-mounted
 # worktree (devbox writes its version cache there, `go test`/`go build`
