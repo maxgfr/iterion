@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -277,4 +278,151 @@ func secretMountArgs(args []string) []string {
 		}
 	}
 	return out
+}
+
+// Regression: a sandboxed `tool` node whose `sh -c <script>` snippet is
+// large (e.g. Seki's majority_verdict interpolating three voter
+// verdicts) trips the host kernel's ARG_MAX and the docker fork dies
+// with "fork/exec /usr/bin/docker: argument list too long". The driver
+// must route oversized scripts through stdin (`docker exec -i … sh -s`)
+// so the script never enters the argv. Small scripts must keep the
+// historical argv shape so behavior is byte-for-byte unchanged for the
+// common case.
+func TestRunCommandRoutesOversizedScriptViaStdin(t *testing.T) {
+	d := &Driver{rt: RuntimeDocker}
+	r := &Run{
+		driver:      d,
+		containerID: "deadbeef",
+		prepared: &Prepared{
+			workspace: "/workspace",
+			spec:      sandbox.Spec{},
+			runtime:   RuntimeDocker,
+		},
+		inContainerWorkspace: "/workspace",
+	}
+
+	t.Run("small script stays in argv", func(t *testing.T) {
+		const script = "echo hello && ls -la"
+		cmd := r.Command(context.Background(), []string{"sh", "-c", script}, sandbox.ExecOpts{})
+
+		if cmd.Stdin != nil {
+			t.Errorf("small script: Stdin must be nil (unchanged behavior); got %T", cmd.Stdin)
+		}
+		if !containsArg(cmd.Args, script) {
+			t.Errorf("small script: argv must still carry the script; args=%v", cmd.Args)
+		}
+		if containsArg(cmd.Args, "-s") {
+			t.Errorf("small script: must NOT use `sh -s` stdin shape; args=%v", cmd.Args)
+		}
+		if containsArg(cmd.Args, "--interactive") {
+			t.Errorf("small script: must NOT add --interactive (no stdin attached); args=%v", cmd.Args)
+		}
+	})
+
+	t.Run("oversized script streamed through stdin", func(t *testing.T) {
+		// > maxInlineArgBytes (100_000) — the E2BIG trigger zone.
+		big := strings.Repeat("x", maxInlineArgBytes+1)
+		script := "cat <<'EOF'\n" + big + "\nEOF\n"
+		cmd := r.Command(context.Background(), []string{"sh", "-c", script}, sandbox.ExecOpts{})
+
+		// The script must NOT appear anywhere in the host argv — that's
+		// the whole point of the fix.
+		for _, a := range cmd.Args {
+			if strings.Contains(a, big) {
+				t.Fatalf("oversized script leaked into argv (E2BIG risk); arg snippet len=%d", len(a))
+			}
+		}
+		// argv must end in `sh -s` (the stdin-read shell shape).
+		if n := len(cmd.Args); n < 2 || cmd.Args[n-2] != "sh" || cmd.Args[n-1] != "-s" {
+			t.Fatalf("oversized script: argv must terminate with `sh -s`; got %v", cmd.Args)
+		}
+		// --interactive must be present so docker keeps the child's
+		// stdin open for the streamed script.
+		if !containsArg(cmd.Args, "--interactive") {
+			t.Fatalf("oversized script: --interactive required for streamed stdin; args=%v", cmd.Args)
+		}
+		// Stdin must yield exactly the original script.
+		if cmd.Stdin == nil {
+			t.Fatal("oversized script: Stdin must be wired")
+		}
+		got, err := io.ReadAll(cmd.Stdin)
+		if err != nil {
+			t.Fatalf("read Stdin: %v", err)
+		}
+		if string(got) != script {
+			t.Fatalf("Stdin payload mismatch: got %d bytes, want %d", len(got), len(script))
+		}
+	})
+
+	t.Run("oversized but caller-provided stdin keeps argv shape", func(t *testing.T) {
+		// When the caller already wired Stdin (e.g. claudesdk Session),
+		// we MUST NOT clobber it — fall back to the argv path even if
+		// the script is large. (The caller knows what they're doing;
+		// e.g. they may have set KeepStdinOpen + StdinPipe.)
+		big := strings.Repeat("y", maxInlineArgBytes+1)
+		callerStdin := strings.NewReader("caller payload")
+		cmd := r.Command(context.Background(), []string{"sh", "-c", big}, sandbox.ExecOpts{Stdin: callerStdin})
+
+		if cmd.Stdin != callerStdin {
+			t.Errorf("caller Stdin must be preserved verbatim; got %T", cmd.Stdin)
+		}
+		if !containsArg(cmd.Args, big) {
+			t.Error("caller-provided Stdin: argv must still carry the script (caller owns stdin)")
+		}
+	})
+
+	t.Run("non sh -c cmd unaffected by threshold", func(t *testing.T) {
+		// Any other cmd shape — `bash -lc`, a direct binary call, or a
+		// custom shell — must keep the argv path so we don't silently
+		// reinterpret a tool's chosen invocation.
+		big := strings.Repeat("z", maxInlineArgBytes+1)
+		cmd := r.Command(context.Background(), []string{"my-tool", big}, sandbox.ExecOpts{})
+
+		if cmd.Stdin != nil {
+			t.Error("non-sh cmd: Stdin must stay nil (we only special-case sh -c)")
+		}
+		if !containsArg(cmd.Args, big) {
+			t.Error("non-sh cmd: argv must carry the original args")
+		}
+	})
+}
+
+// shouldStreamScriptViaStdin is the single source of truth for the
+// argv-vs-stdin decision; assert the predicate directly so a future
+// refactor that changes the trigger threshold (or its shape gate)
+// fails this test loudly rather than masquerading as a Run.Command
+// behavioural shift.
+func TestShouldStreamScriptViaStdinPredicate(t *testing.T) {
+	big := strings.Repeat("a", maxInlineArgBytes+1)
+	cases := []struct {
+		name string
+		cmd  []string
+		opts sandbox.ExecOpts
+		want string
+	}{
+		{"small sh -c", []string{"sh", "-c", "echo ok"}, sandbox.ExecOpts{}, ""},
+		{"oversized sh -c", []string{"sh", "-c", big}, sandbox.ExecOpts{}, big},
+		{"oversized sh -c with caller Stdin", []string{"sh", "-c", big}, sandbox.ExecOpts{Stdin: strings.NewReader("x")}, ""},
+		{"oversized bash -c (not sh)", []string{"bash", "-c", big}, sandbox.ExecOpts{}, ""},
+		{"oversized direct argv", []string{"my-tool", big}, sandbox.ExecOpts{}, ""},
+		{"empty", nil, sandbox.ExecOpts{}, ""},
+		{"sh with extra args", []string{"sh", "-c", big, "name", "arg"}, sandbox.ExecOpts{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldStreamScriptViaStdin(tc.cmd, tc.opts)
+			if got != tc.want {
+				t.Errorf("shouldStreamScriptViaStdin = %d bytes, want %d", len(got), len(tc.want))
+			}
+		})
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }

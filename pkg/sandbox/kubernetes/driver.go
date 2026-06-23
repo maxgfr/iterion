@@ -350,6 +350,16 @@ func (r *Run) Driver() string { return "kubernetes" }
 // `--env` flag — the sandbox env established at pod creation time
 // is the base, and per-call envs are layered on top via the env
 // command.
+//
+// LIMITATION: a `sh -c <huge-script>` cmd is passed as a single argv
+// element to `kubectl exec`, so a hundreds-of-KB interpolated script
+// can in principle trip the host's ARG_MAX (E2BIG) the same way the
+// docker driver did before its stdin-streaming fallback (see
+// [shouldStreamScriptViaStdin] in pkg/sandbox/docker/driver.go). Not
+// observed in practice yet — cloud runs interpolate smaller payloads
+// — so the kubernetes driver currently relies on the argv path. If a
+// real symptom appears, mirror the docker fix here using
+// `kubectl exec -i … -- sh -s` with the script wired to Cmd.Stdin.
 func (r *Run) Command(ctx context.Context, cmd []string, opts sandbox.ExecOpts) *exec.Cmd {
 	if len(cmd) == 0 {
 		return exec.CommandContext(ctx, "")

@@ -467,6 +467,43 @@ type Run struct {
 // Driver returns the runtime name — "docker" or "podman".
 func (r *Run) Driver() string { return string(r.driver.rt) }
 
+// maxInlineArgBytes caps the size of a single argv element passed to
+// `docker exec`. Linux's ARG_MAX is typically 128 KiB–2 MiB for the
+// total argv+env block; a single element well below that bound is
+// always safe, while a multi-hundred-KB shell script interpolated into
+// `docker exec … sh -c <script>` (e.g. Seki's majority_verdict tool
+// node concatenating three large voter verdicts) overflows the kernel's
+// E2BIG check and the docker fork fails with
+// "fork/exec /usr/bin/docker: argument list too long". 100 KB leaves
+// headroom for the rest of the argv (flags, env, container id) on the
+// smallest realistic ARG_MAX and is far above any normal tool snippet.
+const maxInlineArgBytes = 100_000
+
+// shouldStreamScriptViaStdin reports whether the given cmd is the
+// `sh -c <script>` shape and should be routed through stdin instead of
+// argv to avoid ARG_MAX (E2BIG) overflow. Returns the script when so;
+// the empty string otherwise.
+//
+// Conditions: cmd is exactly `["sh","-c", script]`, no stdin is already
+// attached (so we don't clobber a caller-provided reader), and the
+// script exceeds [maxInlineArgBytes]. The shell name is matched on the
+// literal "sh" because that's what every internal caller emits
+// (RunPostCreate, the tool-node executor, the claw bash builtin); any
+// other shell or argv shape falls through to the standard argv path
+// so behavior is byte-for-byte unchanged.
+func shouldStreamScriptViaStdin(cmd []string, opts sandbox.ExecOpts) string {
+	if len(cmd) != 3 || cmd[0] != "sh" || cmd[1] != "-c" {
+		return ""
+	}
+	if opts.Stdin != nil {
+		return ""
+	}
+	if len(cmd[2]) <= maxInlineArgBytes {
+		return ""
+	}
+	return cmd[2]
+}
+
 // Command returns an *exec.Cmd that, when started, runs cmd inside the
 // container via `docker exec`. Stdin/Stdout/Stderr on the returned cmd
 // are forwarded transparently to the in-container process by docker
@@ -480,6 +517,12 @@ func (r *Run) Driver() string { return string(r.driver.rt) }
 // process sees them — setting them on the returned [exec.Cmd.Env]
 // would only affect the host-side `docker exec` driver process, not
 // the inner program.
+//
+// When cmd is `["sh","-c", script]` and the script is larger than
+// [maxInlineArgBytes], the script is streamed through stdin via
+// `sh -s` instead of being passed as a single argv element. This
+// avoids the kernel's ARG_MAX (E2BIG) limit on the host `docker exec`
+// fork — see [shouldStreamScriptViaStdin] for the trigger predicate.
 func (r *Run) Command(ctx context.Context, cmd []string, opts sandbox.ExecOpts) *exec.Cmd {
 	if len(cmd) == 0 {
 		// Mirror noop's degenerate case: return a cmd that errors on
@@ -487,8 +530,10 @@ func (r *Run) Command(ctx context.Context, cmd []string, opts sandbox.ExecOpts) 
 		return exec.CommandContext(ctx, "")
 	}
 
+	stdinScript := shouldStreamScriptViaStdin(cmd, opts)
+
 	args := []string{"exec"}
-	if opts.Stdin != nil || opts.KeepStdinOpen {
+	if opts.Stdin != nil || opts.KeepStdinOpen || stdinScript != "" {
 		args = append(args, "--interactive")
 	}
 	workDir := opts.WorkDir
@@ -513,11 +558,21 @@ func (r *Run) Command(ctx context.Context, cmd []string, opts sandbox.ExecOpts) 
 		args = append(args, "--user", r.prepared.spec.User)
 	}
 	args = append(args, r.containerID)
-	args = append(args, cmd...)
+	if stdinScript != "" {
+		// `sh -s` reads the script from stdin instead of taking it as
+		// an argv element. Works identically on dash, bash, busybox sh.
+		// The script never enters the docker argv, sidestepping E2BIG.
+		args = append(args, "sh", "-s")
+	} else {
+		args = append(args, cmd...)
+	}
 
 	c := exec.CommandContext(ctx, string(r.driver.rt), args...)
-	if opts.Stdin != nil {
+	switch {
+	case opts.Stdin != nil:
 		c.Stdin = opts.Stdin
+	case stdinScript != "":
+		c.Stdin = strings.NewReader(stdinScript)
 	}
 	proc.DetachProcessGroup(c)
 	return c
