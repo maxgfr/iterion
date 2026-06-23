@@ -10,7 +10,9 @@ import (
 	"sync"
 
 	"github.com/SocialGouv/iterion/pkg/bundle"
+	"github.com/SocialGouv/iterion/pkg/bundlelint"
 	"github.com/SocialGouv/iterion/pkg/dsl/ast"
+	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
 )
 
@@ -135,16 +137,22 @@ func invocationVarWarnings(e Entry, vars *VarsBlock) []string {
 	if len(e.Invocations) == 0 {
 		return nil
 	}
-	declared := map[string]bool{}
+	// Delegate to bundlelint so args_var checking has a single implementation
+	// shared with `iterion validate`. Build the minimal manifest + workflow
+	// shapes the check needs — the invocations to scan and the declared var
+	// names to resolve against — then keep only the args_var findings (the
+	// surface the studio has always shown here).
+	w := &ir.Workflow{Vars: map[string]*ir.Var{}}
 	if vars != nil {
 		for _, f := range vars.Fields {
-			declared[f.Name] = true
+			w.Vars[f.Name] = &ir.Var{Name: f.Name}
 		}
 	}
+	m := &bundle.Manifest{Invocations: e.Invocations}
 	var warns []string
-	for _, inv := range e.Invocations {
-		if inv.ArgsVar != "" && !declared[inv.ArgsVar] {
-			warns = append(warns, fmt.Sprintf("invocation args_var %q is not a declared var of this bot", inv.ArgsVar))
+	for _, d := range bundlelint.CheckConsistency(bundlelint.Input{Manifest: m, Workflow: w}) {
+		if d.Code == bundlelint.DiagArgsVarUnknown {
+			warns = append(warns, d.Message)
 		}
 	}
 	return warns

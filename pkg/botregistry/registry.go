@@ -18,8 +18,6 @@ import (
 	"sort"
 	"strings"
 
-	"go.yaml.in/yaml/v2"
-
 	"github.com/SocialGouv/iterion/pkg/bundle"
 	"github.com/SocialGouv/iterion/pkg/dsl/workflowfile"
 )
@@ -355,7 +353,7 @@ func parseBundle(dir string) (*Entry, error) {
 	if m.Name == "" {
 		m.Name = filepath.Base(dir)
 	}
-	if fm := readFrontmatter(filepath.Join(dir, "main.bot")); fm != nil {
+	if fm := bundle.ReadFrontmatter(filepath.Join(dir, "main.bot")); fm != nil {
 		if len(fm.Triggers) > 0 {
 			m.Triggers = fm.Triggers
 		}
@@ -387,7 +385,7 @@ func parseBotFile(path string) (*Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bots: read %s: %w", path, err)
 	}
-	fm := parseFrontmatterBody(raw)
+	fm := bundle.ParseFrontmatter(raw)
 	// Loose .bot files carry no manifest, so they default to
 	// enabled (overlay may still flip them in List) and are not
 	// manifest-editable.
@@ -410,57 +408,6 @@ func parseBotFile(path string) (*Entry, error) {
 		e.Description = leadingCommentDescription(raw)
 	}
 	return e, nil
-}
-
-type frontmatter struct {
-	Name         string   `yaml:"name"`
-	Description  string   `yaml:"description"`
-	Triggers     []string `yaml:"triggers"`
-	Capabilities []string `yaml:"capabilities"`
-}
-
-func readFrontmatter(path string) *frontmatter {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	return parseFrontmatterBody(raw)
-}
-
-// parseFrontmatterBody pulls a `## ---` … `## ---` block from the top
-// of the file and YAML-decodes the inner content. The block is allowed
-// only at the very top of the file, optionally after blank lines.
-func parseFrontmatterBody(raw []byte) *frontmatter {
-	lines := strings.Split(string(raw), "\n")
-	i := 0
-	for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
-		i++
-	}
-	if i >= len(lines) || strings.TrimSpace(lines[i]) != "## ---" {
-		return nil
-	}
-	start := i + 1
-	end := -1
-	for j := start; j < len(lines); j++ {
-		if strings.TrimSpace(lines[j]) == "## ---" {
-			end = j
-			break
-		}
-	}
-	if end < 0 {
-		return nil
-	}
-	var yamlLines []string
-	for _, ln := range lines[start:end] {
-		stripped := strings.TrimPrefix(ln, "## ")
-		stripped = strings.TrimPrefix(stripped, "##")
-		yamlLines = append(yamlLines, stripped)
-	}
-	var fm frontmatter
-	if err := yaml.Unmarshal([]byte(strings.Join(yamlLines, "\n")), &fm); err != nil {
-		return nil
-	}
-	return &fm
 }
 
 // leadingCommentDescription returns the first paragraph of `## ` lines

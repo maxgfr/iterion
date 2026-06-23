@@ -1,6 +1,6 @@
 # Iterion DSL — Validation Diagnostics
 
-All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`ir.Validate`). Diagnostics are either **errors** (block execution) or **warnings** (informational).
+All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`ir.Validate`), plus the bundle-consistency codes (`C2xx`) that `iterion validate` reports for a packaged bot. Diagnostics are either **errors** (block execution) or **warnings** (informational).
 
 ## Compilation Diagnostics
 
@@ -74,6 +74,18 @@ All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`
 | **C084** | error | Invalid cursor value | A cursor invocation value is not in the enum, falls outside `[0, 1]`, or doesn't match any band. `${VAR}` values defer to runtime | Use a declared enum value or a numeric in range; for env-driven values, ensure the substituted result is valid |
 | **C085** | error | Malformed cursor declaration | A `cursor <name>:` block declares neither `values:` nor `bands:`, declares both, has overlapping bands, or has a range outside `[0, 1]` | Pick exactly one form (enum or numeric); ensure bands cover disjoint sub-ranges of `[0, 1]` |
 | **C086** | error | Duplicate cursor name | The same `cursor <name>:` declaration appears twice in one source | Rename one of them, or merge their `values:` / `bands:` entries |
+| **C103** | error | Enum literal never matches | A `when "field == 'literal'"` / `!=` comparison (or a `compute` expression) compares an enum-typed field against a literal that is not one of its `enum:` values — the comparison can never match, so it is almost always a typo | Use a declared enum value, or fix the field's `enum:` set. `json` fields and unresolved refs are never flagged |
+| **C107** | warning | Expression operand type mismatch | A comparison inside a `compute` or quoted `when "..."` expression has statically-known operands of incompatible type classes (e.g. `string[] == int`, `count < "x"`) | Compare compatible types. Inference is conservative: `json` (= any) fields, vars, and unresolved refs bail to "no opinion" and are never flagged |
+| **C108** | warning | when-expression not boolean | A quoted `when "<expr>"` is a bare numeric value (e.g. `when "count"`) rather than a boolean — int/float coerce to truthy, which is rarely the author's intent | Use a comparison such as `when "count > 0"`. Bare `bool`, `string[]`, and `string` values ride the documented truthy idiom and are not flagged |
+| **C109** | error | Var default type mismatch | A `vars:` entry's default literal type doesn't match its declared type (e.g. `count: int = "x"`) | Fix the default to match the type. `int`→`float` widening is allowed (`ratio: float = 5`); `json` and `string[]` accept loose literals and are never flagged |
+
+> **Unallocated by design:** `C104`, `C105`, and `C106` are intentionally
+> left free. An earlier draft used `C105`/`C106` to check edge `with:`
+> mapping keys/types against the target node's `input:` schema, but the
+> runtime (`engine.buildNodeInputRS`) passes every `with` key through
+> verbatim and never validates node input against the declared schema — the
+> input schema is advisory, not a contract a `with` mapping must satisfy —
+> so the check rested on a false premise and was dropped.
 
 > **Historical code-reuse note:** earlier releases reused `C030` for
 > two cases. `C029` was introduced for the validator-side
@@ -81,6 +93,29 @@ All diagnostic codes emitted during compilation (`ir.Compile`) and validation (`
 > compile-time *Codex backend discouraged* warning. If an older log
 > shows `C030` on an `outputs.<unknown>` reference, treat it as the
 > modern `C029`.
+
+## Bundle Consistency Diagnostics (manifest ↔ workflow)
+
+These `C2xx` diagnostics come from `pkg/bundlelint`, emitted when `iterion validate`
+runs on a **bundle** (a `.botz` archive or a directory with `manifest.yaml` +
+`main.bot`). They cross-check the manifest against the *compiled workflow* —
+something neither the manifest parser (`pkg/bundle`) nor the DSL compiler
+(`pkg/dsl/ir`) can do alone, because each only sees one side. They are reported
+under a separate `bundle_diagnostics` list in `--json` output. All are warnings
+except **C230**; warnings are surfaced but do not fail validation.
+
+| Code | Severity | Description | Cause | Fix |
+|------|----------|-------------|-------|-----|
+| **C200** | warning | dispatch_vars key not a workflow var | A `manifest.dispatch_vars` key names no variable in the workflow `vars:` block | Declare the var in `main.bot`, or fix/remove the manifest key — an undeclared key is silently dropped at dispatch time |
+| **C201** | warning | context_vars key not a workflow var | An `invocations[].context_vars` key names no workflow var | Same as C200 |
+| **C202** | warning | schedule.default_vars key not a workflow var | An `invocations[].schedule.default_vars` key names no workflow var | Same as C200 |
+| **C203** | warning | launch_vars key not a workflow var | A `forge.webhook.launch_vars` key names no workflow var | Same as C200 |
+| **C204** | warning | args_var not a workflow var | An `invocations[].args_var` names no workflow var, so the trigger's free-text payload is dropped | Declare the var, or fix the name |
+| **C210** | warning | forge secret not declared | The forge secret the bot expects (`forge.secret`, default `forge_token`) has no matching declaration in the `main.bot` `secrets:` block | Declare `secrets: { <name>: { as: file, optional: true } }`, or point `forge.secret` at an existing secret. Only checked when the bot is forge-triggerable (has `forge.events` or a `kind: forge` invocation) |
+| **C211** | warning | forge secret not a file mount | The forge secret is declared but not `as: file` — managed forge tokens are bound as a file mount | Set `as: file` on the secret declaration |
+| **C220** | warning | manifest capability granted by no node | A `manifest.capabilities` entry is granted by no workflow-level or node-level `capabilities:` list | Add it to a node's `capabilities:`, or drop it from the manifest (it is documentation-only otherwise) |
+| **C221** | warning | frontmatter capabilities override manifest | The `main.bot` `## ---` frontmatter declares `capabilities:` that differ from and silently override the manifest's | Keep one source of truth — drop the frontmatter list or align the two |
+| **C230** | error | per-bot memory name mismatch | A node uses `memory: visibility: bot`, but the manifest name, workflow name, and bundle dir name are not all identical — so the bot's memory tree splits across CLI (workflow name) and dispatcher (bundle name) launches | Make all three identical |
 
 ## Quick Troubleshooting
 

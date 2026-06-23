@@ -45,6 +45,7 @@
 vars:
   workspace_dir:       string = "${PROJECT_DIR}"
   severity_threshold:  string = "medium"
+  scope_notes:         string = ""
   scan_dir:            string = "${PROJECT_DIR}/.iterion/security/scan-deps"
   cache_dir:           string = "${HOME}/.iterion/security-cache"
   cache_path:          string = "${HOME}/.iterion/security-cache/packages.jsonl"
@@ -88,6 +89,7 @@ schema filter_output:
 schema review_input:
   workspace_dir:       string
   severity_threshold:  string
+  scope_notes:         string
   pending:             json
   heuristics:          json
 
@@ -288,6 +290,7 @@ prompt review_system:
 prompt review_user:
   Workspace: {{input.workspace_dir}}
   Severity threshold: {{input.severity_threshold}}
+  Operator scope notes: {{input.scope_notes}}
 
   Pending packages ({{input.pending}}):
   {{input.pending}}
@@ -737,6 +740,7 @@ workflow sec_audit_deps:
   filter_cached -> llm_review with {
     workspace_dir:       "{{vars.workspace_dir}}",
     severity_threshold:  "{{vars.severity_threshold}}",
+    scope_notes:         "{{vars.scope_notes}}",
     pending:             "{{outputs.filter_cached.pending}}",
     heuristics:          "{{outputs.heuristic_join}}"
   }

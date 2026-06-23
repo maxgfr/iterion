@@ -79,6 +79,26 @@ const (
 
 	// RTK output-compression mode diagnostics.
 	DiagInvalidRTK DiagCode = "C102" // rtk: value not one of on|off|ultra (error)
+
+	// Static cross-node typing diagnostics (Phase 2). These resist the
+	// looseness that makes the rest of the validator a graph linter: they
+	// fire ONLY on genuinely-typed slots (enum literals compared against an
+	// enum-typed field, typed operands inside compute/when expressions),
+	// never on template stringification. A json (= any) field or an
+	// unknown ref always bails to "no opinion" so legitimate looseness
+	// keeps passing.
+	//
+	// NOTE: an earlier draft also checked edge with-mapping keys/types
+	// against the target node's input schema (C105/C106). That was dropped:
+	// the runtime (engine.buildNodeInputRS) passes EVERY with-key through
+	// verbatim and never validates node input against the declared input
+	// schema — the schema is advisory, not a contract a with-mapping must
+	// satisfy — so such a check rests on a false premise. C104/C105/C106
+	// are intentionally left unallocated.
+	DiagEnumLiteralMismatch     DiagCode = "C103" // comparison literal outside the target field's enum set (error)
+	DiagExprOperandTypeMismatch DiagCode = "C107" // compute/when expression operands incompatible under the operator (warning)
+	DiagWhenExprNotBoolish      DiagCode = "C108" // when-expression result clearly not bool-coercible (warning)
+	DiagVarDefaultTypeMismatch  DiagCode = "C109" // a var's default literal type does not match its declared type (error)
 )
 
 // validate performs static validation on a compiled workflow.
@@ -93,6 +113,7 @@ func (c *compiler) validate(w *Workflow) {
 	c.validateRoundRobinEdges(w)
 	c.validateLLMRouterEdges(w)
 	c.validateConditionFields(w)
+	c.validateExprTypes(w)
 	c.validateDuplicateWithKeys(w)
 	c.validateReachability(w)
 	c.validateHistoryRefs(w)
@@ -753,6 +774,16 @@ func findField(s *Schema, name string) *SchemaField {
 		}
 	}
 	return nil
+}
+
+// isRuntimeInjectedField reports whether a field name is a runtime-injected
+// internal field — underscore-prefixed (e.g. _session_id, _session_fingerprint)
+// — that is deliberately absent from declared schemas. Both the outputs-ref
+// validator (C031/C032) and the static type checker skip these so threading
+// session metadata through edges/refs never trips a "field not in schema"
+// diagnostic.
+func isRuntimeInjectedField(name string) bool {
+	return len(name) > 0 && name[0] == '_'
 }
 
 // ---------------------------------------------------------------------------
@@ -1620,9 +1651,8 @@ func (c *compiler) validateOutputsRef(w *Workflow, rc refContext, predecessors m
 		return
 	}
 
-	// Skip underscore-prefixed fields — these are runtime-injected internal
-	// fields (e.g. _session_id) not declared in output schemas.
-	if len(fieldName) > 0 && fieldName[0] == '_' {
+	// Skip runtime-injected fields (e.g. _session_id) not declared in schemas.
+	if isRuntimeInjectedField(fieldName) {
 		return
 	}
 

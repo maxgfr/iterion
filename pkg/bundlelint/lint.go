@@ -1,0 +1,339 @@
+// Package bundlelint cross-checks a bot bundle's manifest.yaml against its
+// compiled main.bot workflow, surfacing structural inconsistencies that
+// neither the manifest parser (pkg/bundle) nor the DSL compiler
+// (pkg/dsl/ir) can see on their own — because each validates only one side.
+//
+// The canonical failure it catches: a manifest var-map key (dispatch_vars,
+// context_vars, schedule.default_vars, launch_vars, args_var) that names a
+// workflow var the main.bot doesn't declare. At runtime such a key is
+// silently dropped, so the trigger payload never reaches the bot. bundlelint
+// turns that silent drop into a visible diagnostic at `iterion validate`
+// time and in CI.
+//
+// Diagnostics use a dedicated C2xx code family, distinct from the DSL
+// compiler's C0xx/C1xx codes, so the two layers never collide and tooling
+// can group bundle-level findings by prefix.
+package bundlelint
+
+import (
+	"fmt"
+	"sort"
+
+	"github.com/SocialGouv/iterion/pkg/bundle"
+	"github.com/SocialGouv/iterion/pkg/dsl/ir"
+)
+
+// Code identifies a bundle-consistency diagnostic (C2xx family).
+type Code string
+
+const (
+	// DiagDispatchVarUnknown: a manifest dispatch_vars key is not a declared
+	// workflow var (silently dropped by the dispatcher at runtime).
+	DiagDispatchVarUnknown Code = "C200"
+	// DiagContextVarUnknown: an invocation context_vars key is not a declared
+	// workflow var (silently dropped by the webhook/command launch path).
+	DiagContextVarUnknown Code = "C201"
+	// DiagScheduleDefaultVarUnknown: an invocation schedule.default_vars key
+	// is not a declared workflow var (silently dropped by the scheduler).
+	DiagScheduleDefaultVarUnknown Code = "C202"
+	// DiagLaunchVarUnknown: a forge.webhook.launch_vars key is not a declared
+	// workflow var (silently dropped by the auto-provisioned webhook).
+	DiagLaunchVarUnknown Code = "C203"
+	// DiagArgsVarUnknown: an invocation args_var names a var the workflow does
+	// not declare, so the trigger's free-text payload is dropped.
+	DiagArgsVarUnknown Code = "C204"
+
+	// DiagForgeSecretUnknown: the forge secret name the bot expects to be
+	// bound has no matching declaration in the main.bot secrets: block.
+	DiagForgeSecretUnknown Code = "C210"
+	// DiagForgeSecretNotFile: the forge secret is declared but not as a file
+	// mount (`as: file`), the form managed forge tokens are bound under.
+	DiagForgeSecretNotFile Code = "C211"
+
+	// DiagManifestCapNotInWorkflow: a manifest capability is granted by no
+	// workflow-level or node-level capabilities: list.
+	DiagManifestCapNotInWorkflow Code = "C220"
+	// DiagFrontmatterCapsOverride: the main.bot `## ---` frontmatter declares
+	// capabilities that silently override (and differ from) the manifest's.
+	DiagFrontmatterCapsOverride Code = "C221"
+
+	// DiagBundleNameTripleMismatch: a node opts into per-bot memory
+	// (visibility: bot) but the manifest name, workflow name, and bundle dir
+	// name disagree, so the bot's memory tree splits across launch paths.
+	DiagBundleNameTripleMismatch Code = "C230"
+)
+
+// Severity mirrors ir.Severity semantics: an error makes `iterion validate`
+// exit non-zero; a warning is surfaced but non-fatal.
+type Severity int
+
+const (
+	SeverityError Severity = iota
+	SeverityWarning
+)
+
+func (s Severity) String() string {
+	if s == SeverityWarning {
+		return "warning"
+	}
+	return "error"
+}
+
+// Diag is a single manifest↔workflow consistency finding. Field carries a
+// dotted path into the manifest (the attribution surface here is the
+// manifest, not the workflow graph — hence Field rather than ir's
+// NodeID/EdgeID).
+type Diag struct {
+	Code     Code
+	Severity Severity
+	Field    string
+	Message  string
+	Hint     string
+}
+
+// Error renders the diagnostic in the same shape as ir.Diagnostic.Error so
+// the studio and CLI display both layers uniformly.
+func (d Diag) Error() string {
+	if d.Field != "" {
+		return fmt.Sprintf("%s [%s] %s: %s", d.Severity, d.Code, d.Field, d.Message)
+	}
+	return fmt.Sprintf("%s [%s]: %s", d.Severity, d.Code, d.Message)
+}
+
+// Input bundles the consistency-check inputs. Manifest and Workflow are the
+// core pair; Frontmatter and DirName enable the two checks that need more
+// than the core artifacts (C221 needs the raw main.bot frontmatter; C230
+// needs the bundle directory basename). Leaving the optional fields at their
+// zero value simply skips the checks that depend on them.
+type Input struct {
+	Manifest    *bundle.Manifest
+	Workflow    *ir.Workflow
+	Frontmatter *bundle.Frontmatter
+	DirName     string
+}
+
+// CheckConsistency cross-checks a bot's manifest against its compiled
+// workflow. A nil Manifest skips all manifest-side checks; a nil Workflow
+// disables the checks that resolve names against the workflow (var-map,
+// forge-secret, capability checks). Returned diagnostics are deterministically
+// ordered by (Code, Field).
+func CheckConsistency(in Input) []Diag {
+	m := in.Manifest
+	if m == nil {
+		return nil
+	}
+	var diags []Diag
+	checkVarMaps(&diags, m, in.Workflow)
+	checkForgeSecret(&diags, m, in.Workflow)
+	checkCapabilities(&diags, m, in.Workflow, in.Frontmatter)
+	checkBundleNameStability(&diags, m, in.Workflow, in.DirName)
+
+	sort.SliceStable(diags, func(i, j int) bool {
+		if diags[i].Code != diags[j].Code {
+			return diags[i].Code < diags[j].Code
+		}
+		return diags[i].Field < diags[j].Field
+	})
+	return diags
+}
+
+// varDeclared reports whether the workflow declares a var by this name.
+func varDeclared(w *ir.Workflow, name string) bool {
+	if w == nil || w.Vars == nil {
+		return false
+	}
+	_, ok := w.Vars[name]
+	return ok
+}
+
+// checkVarMaps verifies every manifest var-map key (and args_var) names a
+// var the workflow declares. An undeclared key is dropped silently at
+// runtime — exactly the bug class this linter exists to surface.
+func checkVarMaps(diags *[]Diag, m *bundle.Manifest, w *ir.Workflow) {
+	if w == nil {
+		return
+	}
+	checkVarMap(diags, w, m.DispatchVars, DiagDispatchVarUnknown, "dispatch_vars")
+	if m.Forge != nil && m.Forge.Webhook != nil {
+		checkVarMap(diags, w, m.Forge.Webhook.LaunchVars, DiagLaunchVarUnknown, "forge.webhook.launch_vars")
+	}
+	for i, inv := range m.Invocations {
+		base := fmt.Sprintf("invocations[%d]", i)
+		checkVarMap(diags, w, inv.ContextVars, DiagContextVarUnknown, base+".context_vars")
+		if inv.Schedule != nil {
+			checkVarMap(diags, w, inv.Schedule.DefaultVars, DiagScheduleDefaultVarUnknown, base+".schedule.default_vars")
+		}
+		if inv.ArgsVar != "" && !varDeclared(w, inv.ArgsVar) {
+			*diags = append(*diags, Diag{
+				Code:     DiagArgsVarUnknown,
+				Severity: SeverityWarning,
+				Field:    base + ".args_var",
+				Message:  fmt.Sprintf("args_var %q is not a declared workflow var; the trigger payload will be dropped at runtime", inv.ArgsVar),
+				Hint:     "declare it in the workflow vars: block or fix the name",
+			})
+		}
+	}
+}
+
+func checkVarMap(diags *[]Diag, w *ir.Workflow, vars map[string]string, code Code, fieldPrefix string) {
+	// Iterate in sorted key order so a single map contributes deterministic
+	// diagnostics even before the final sort (helps stable test golden order).
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if varDeclared(w, k) {
+			continue
+		}
+		*diags = append(*diags, Diag{
+			Code:     code,
+			Severity: SeverityWarning,
+			Field:    fieldPrefix + "." + k,
+			Message:  fmt.Sprintf("key %q is not a declared workflow var; it will be silently dropped at runtime", k),
+			Hint:     "declare it in the workflow vars: block or remove it from the manifest",
+		})
+	}
+}
+
+// checkForgeSecret fulfils the cross-reference the manifest parser documents
+// but cannot perform (it never sees main.bot): the forge secret the bot
+// expects must be declared, and as a file mount.
+func checkForgeSecret(diags *[]Diag, m *bundle.Manifest, w *ir.Workflow) {
+	if w == nil {
+		return
+	}
+	forgeActive := m.Forge != nil && len(m.Forge.Events) > 0
+	for _, inv := range m.Invocations {
+		if inv.Kind == bundle.InvocationKindForge {
+			forgeActive = true
+			break
+		}
+	}
+	if !forgeActive {
+		return
+	}
+	name := m.Forge.SecretName() // nil-safe: returns DefaultForgeSecretName
+	sec, ok := w.Secrets[name]
+	if !ok {
+		*diags = append(*diags, Diag{
+			Code:     DiagForgeSecretUnknown,
+			Severity: SeverityWarning,
+			Field:    "forge.secret",
+			Message:  fmt.Sprintf("forge secret %q has no matching declaration in the workflow secrets: block; the managed forge token would be unbound at runtime", name),
+			Hint:     "declare `secrets: { " + name + ": { as: file, optional: true } }` in main.bot, or set forge.secret to an existing secret name",
+		})
+		return
+	}
+	if !sec.IsFile() {
+		*diags = append(*diags, Diag{
+			Code:     DiagForgeSecretNotFile,
+			Severity: SeverityWarning,
+			Field:    "forge.secret",
+			Message:  fmt.Sprintf("forge secret %q is declared as %q, but managed forge tokens are bound as a file mount (as: file)", name, sec.As),
+			Hint:     "set `as: file` on the secret declaration in main.bot",
+		})
+	}
+}
+
+// checkCapabilities flags manifest capabilities granted by no node (C220)
+// and a frontmatter capabilities list that silently overrides a differing
+// manifest one (C221).
+func checkCapabilities(diags *[]Diag, m *bundle.Manifest, w *ir.Workflow, fm *bundle.Frontmatter) {
+	if w != nil && len(m.Capabilities) > 0 {
+		granted := map[string]bool{}
+		for _, c := range w.Capabilities {
+			granted[c] = true
+		}
+		for _, n := range w.Nodes {
+			if ln, ok := n.(ir.LLMNode); ok {
+				for _, c := range ln.GetCapabilities() {
+					granted[c] = true
+				}
+			}
+		}
+		for i, c := range m.Capabilities {
+			if !granted[c] {
+				*diags = append(*diags, Diag{
+					Code:     DiagManifestCapNotInWorkflow,
+					Severity: SeverityWarning,
+					Field:    fmt.Sprintf("capabilities[%d]", i),
+					Message:  fmt.Sprintf("manifest capability %q is granted by no workflow-level or node-level capabilities: list", c),
+					Hint:     "add it to a node's capabilities: list, or drop it from the manifest (documentation-only otherwise)",
+				})
+			}
+		}
+	}
+
+	if fm != nil && len(fm.Capabilities) > 0 && len(m.Capabilities) > 0 && !sameStringSet(fm.Capabilities, m.Capabilities) {
+		*diags = append(*diags, Diag{
+			Code:     DiagFrontmatterCapsOverride,
+			Severity: SeverityWarning,
+			Field:    "capabilities",
+			Message:  "main.bot frontmatter capabilities silently override the manifest capabilities (they differ); discovery uses the frontmatter set",
+			Hint:     "keep one source of truth — drop the frontmatter capabilities or align the two lists",
+		})
+	}
+}
+
+// checkBundleNameStability generalises the per-bot-memory invariant: a node
+// using visibility: bot needs manifest name == workflow name == dir name so
+// the bot's memory tree is keyed identically across CLI (workflow name) and
+// dispatcher (bundle name) launches.
+func checkBundleNameStability(diags *[]Diag, m *bundle.Manifest, w *ir.Workflow, dirName string) {
+	if w == nil || dirName == "" {
+		return
+	}
+	if w.Name == dirName && m.Name == dirName {
+		return // names already stable — nothing to flag regardless of memory
+	}
+	// Names disagree: only a problem if a node actually uses per-bot memory.
+	// Check that last so the node walk is skipped on the common (stable) path.
+	if !usesPerBotMemory(w) {
+		return
+	}
+	*diags = append(*diags, Diag{
+		Code:     DiagBundleNameTripleMismatch,
+		Severity: SeverityError,
+		Field:    "name",
+		Message: fmt.Sprintf(
+			"per-bot memory (visibility: bot) requires manifest name == workflow name == bundle dir so the memory tree is stable across CLI and dispatcher launches; got manifest=%q workflow=%q dir=%q",
+			m.Name, w.Name, dirName,
+		),
+		Hint: "make all three identical (rename the bundle dir, the `workflow NAME:`, or the manifest name:)",
+	})
+}
+
+// usesPerBotMemory reports whether any node opts into per-bot memory.
+func usesPerBotMemory(w *ir.Workflow) bool {
+	for _, n := range w.Nodes {
+		ln, ok := n.(ir.LLMNode)
+		if !ok {
+			continue
+		}
+		if mem := ln.GetMemory(); mem != nil && mem.Visibility == "bot" {
+			return true
+		}
+	}
+	return false
+}
+
+// sameStringSet reports whether a and b contain the same set of strings,
+// order-insensitive.
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]int, len(a))
+	for _, s := range a {
+		set[s]++
+	}
+	for _, s := range b {
+		set[s]--
+		if set[s] < 0 {
+			return false
+		}
+	}
+	return true
+}

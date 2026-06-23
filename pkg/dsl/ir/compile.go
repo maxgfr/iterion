@@ -1219,15 +1219,21 @@ func (c *compiler) compileVars(topLevel *ast.VarsBlock, workflowLevel *ast.VarsB
 			}
 			if f.Default != nil {
 				v.HasDefault = true
-				switch f.Default.Kind {
-				case ast.LitString:
-					v.Default = f.Default.StrVal
-				case ast.LitInt:
-					v.Default = f.Default.IntVal
-				case ast.LitFloat:
-					v.Default = f.Default.FloatVal
-				case ast.LitBool:
-					v.Default = f.Default.BoolVal
+				// Reuse the preset coercion so a var default is validated and
+				// normalized identically to a preset value (incl. int→float
+				// widening — the old hand-rolled switch stored an int on a
+				// float var). A scalar default whose literal type doesn't match
+				// the declared type is C109; json / string[] accept loose
+				// literals so they are never flagged. The natural value is kept
+				// regardless so downstream {{vars.X}} refs still resolve.
+				if coerced, ok := coercePresetLiteral(f.Default, v.Type); ok {
+					v.Default = coerced
+				} else {
+					v.Default = literalNaturalValue(f.Default)
+					if v.Type != VarJSON && v.Type != VarStringArray {
+						c.errorf(DiagVarDefaultTypeMismatch,
+							"var %q default value has wrong type (expected %s)", f.Name, v.Type.String())
+					}
 				}
 			}
 			vars[f.Name] = v
@@ -1348,6 +1354,26 @@ func coercePresetLiteral(lit *ast.Literal, vt VarType) (interface{}, bool) {
 		}
 	}
 	return nil, false
+}
+
+// literalNaturalValue returns the Go value a literal carries by its own kind,
+// ignoring any declared target type. Used as the fallback when a value fails
+// type coercion (C109) so downstream references still resolve to something.
+func literalNaturalValue(lit *ast.Literal) interface{} {
+	if lit == nil {
+		return nil
+	}
+	switch lit.Kind {
+	case ast.LitString:
+		return lit.StrVal
+	case ast.LitInt:
+		return lit.IntVal
+	case ast.LitFloat:
+		return lit.FloatVal
+	case ast.LitBool:
+		return lit.BoolVal
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

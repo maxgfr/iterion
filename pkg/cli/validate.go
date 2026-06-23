@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
 	"github.com/SocialGouv/iterion/pkg/bundle"
+	"github.com/SocialGouv/iterion/pkg/bundlelint"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/dsl/parser"
 	"github.com/SocialGouv/iterion/pkg/runview"
@@ -23,6 +25,10 @@ type ValidateResult struct {
 	BundleVersion      string   `json:"bundle_version,omitempty"`
 	ParseDiagnostics   []string `json:"parse_diagnostics,omitempty"`
 	CompileDiagnostics []string `json:"compile_diagnostics,omitempty"`
+	// BundleDiagnostics holds manifest↔workflow consistency findings
+	// (bundlelint, C2xx). Kept separate from CompileDiagnostics so the
+	// studio can distinguish DSL-level from manifest-level issues.
+	BundleDiagnostics []string `json:"bundle_diagnostics,omitempty"`
 }
 
 // RunValidate parses, compiles, and validates a .bot file or `.botz`
@@ -32,39 +38,29 @@ type ValidateResult struct {
 func RunValidate(path string, p *Printer) error {
 	path = ResolveRecipePath(path)
 
-	// Bundle dispatch: detect .botz or directory bundles and unpack
-	// before validating. Plain .bot paths fall through unchanged.
-	kind, err := bundle.Detect(path)
+	// Bundle dispatch: detect .botz or directory bundles and unpack before
+	// validating, via the shared helper (same path as run/resume/doctor).
+	// Plain .bot paths fall through with a nil bundle.
+	bundleHandle, iterPath, kind, cleanup, err := openBundleOrFile(path)
 	if err != nil {
-		return fmt.Errorf("cannot inspect %s: %w", path, err)
+		return fmt.Errorf("cannot open %s: %w", path, err)
 	}
-	var bundleName, bundleVersion string
-	var bundleHandle *bundle.Bundle
+	defer cleanup()
+
+	var bundleName, bundleVersion, bundleDir string
+	if bundleHandle != nil && bundleHandle.Manifest != nil {
+		bundleName = bundleHandle.Manifest.Name
+		bundleVersion = bundleHandle.Manifest.Version
+	}
 	switch kind {
 	case bundle.KindBundle:
-		b, cleanup, openErr := bundle.Open(path, "")
-		if openErr != nil {
-			return fmt.Errorf("cannot open bundle: %w", openErr)
-		}
-		defer cleanup()
-		if b.Manifest != nil {
-			bundleName = b.Manifest.Name
-			bundleVersion = b.Manifest.Version
-		}
-		path = b.IterPath
-		bundleHandle = b
+		// A .botz extracts to a cache dir, so the bundle's name-on-disk (used
+		// by the per-bot-memory stability check) is the archive's stem.
+		bundleDir = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	case bundle.KindBundleDir:
-		b, openErr := bundle.OpenDir(path)
-		if openErr != nil {
-			return fmt.Errorf("cannot open bundle dir: %w", openErr)
-		}
-		if b.Manifest != nil {
-			bundleName = b.Manifest.Name
-			bundleVersion = b.Manifest.Version
-		}
-		path = b.IterPath
-		bundleHandle = b
+		bundleDir = filepath.Base(path)
 	}
+	path = iterPath
 
 	src, err := os.ReadFile(path)
 	if err != nil {
@@ -128,6 +124,24 @@ func RunValidate(path string, p *Printer) error {
 		result.EdgeCount = len(cr.Workflow.Edges)
 	}
 
+	// Bundle consistency: cross-check the manifest against the compiled
+	// workflow (var maps, forge secret, capabilities, per-bot-memory name
+	// stability). Only runs for bundles; plain .bot files have no manifest.
+	if bundleHandle != nil && bundleHandle.Manifest != nil && cr.Workflow != nil {
+		diags := bundlelint.CheckConsistency(bundlelint.Input{
+			Manifest:    bundleHandle.Manifest,
+			Workflow:    cr.Workflow,
+			Frontmatter: bundle.ParseFrontmatter(src), // reuse the bytes already read
+			DirName:     bundleDir,
+		})
+		for _, d := range diags {
+			result.BundleDiagnostics = append(result.BundleDiagnostics, d.Error())
+			if d.Severity == bundlelint.SeverityError {
+				result.Valid = false
+			}
+		}
+	}
+
 	if p.Format == OutputJSON {
 		p.JSON(result)
 	} else {
@@ -141,6 +155,7 @@ func RunValidate(path string, p *Printer) error {
 			p.KV("Edges", fmt.Sprintf("%d", result.EdgeCount))
 		}
 		allDiags := append(result.ParseDiagnostics, result.CompileDiagnostics...)
+		allDiags = append(allDiags, result.BundleDiagnostics...)
 		if len(allDiags) > 0 {
 			p.Blank()
 			p.Line("  Diagnostics:")

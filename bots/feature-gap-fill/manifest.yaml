@@ -23,7 +23,6 @@ dispatch_vars:
     {{issue.title}}
 
     {{issue.body}}
-  issue_id: "{{issue.identifier}}"
 
 invocations:
   - kind: command

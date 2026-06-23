@@ -832,6 +832,26 @@ func (vt VarType) String() string {
 	}
 }
 
+// AsFieldType maps a VarType to the equivalent schema FieldType. ok is false
+// for VarJSON (which is "any" — no single field type) so callers can bail to
+// "no opinion" rather than treat it as a concrete type. The two enums are
+// parallel; this is the one canonical mapping between them.
+func (vt VarType) AsFieldType() (FieldType, bool) {
+	switch vt {
+	case VarString:
+		return FieldTypeString, true
+	case VarBool:
+		return FieldTypeBool, true
+	case VarInt:
+		return FieldTypeInt, true
+	case VarFloat:
+		return FieldTypeFloat, true
+	case VarStringArray:
+		return FieldTypeStringArray, true
+	}
+	return FieldTypeJSON, false // VarJSON / unknown → no opinion
+}
+
 // ---------------------------------------------------------------------------
 // Preset — resolved named bundle of variable values
 // ---------------------------------------------------------------------------
