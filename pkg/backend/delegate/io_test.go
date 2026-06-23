@@ -2,15 +2,22 @@ package delegate
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 )
 
 func TestIOTaskRoundTrip(t *testing.T) {
 	original := Task{
-		NodeID:                "node-1",
-		SystemPrompt:          "you are helpful",
-		UserPrompt:            "do the thing",
+		NodeID:           "node-1",
+		Iteration:        3,
+		SystemPrompt:     "you are helpful",
+		SystemPromptMode: SystemPromptAuthoredBase,
+		UserPrompt:       "do the thing",
+		UserContent: []ContentBlock{
+			{Type: "text", Text: "do the thing"},
+			{Type: "image", MediaType: "image/png", Data: "aW1hZ2U=", Path: "assets/image.png", Name: "diagram"},
+		},
 		AllowedTools:          []string{"Bash", "Read"},
 		OutputSchema:          json.RawMessage(`{"type":"object"}`),
 		Model:                 "anthropic/claude-sonnet-4-6",
@@ -19,7 +26,13 @@ func TestIOTaskRoundTrip(t *testing.T) {
 		MaxTokens:             8192,
 		WorkDir:               "/workspace",
 		BaseDir:               "/workspace",
+		RepoRoot:              "/repo",
 		ReasoningEffort:       "high",
+		Ultracode:             true,
+		SecretsHygiene:        true,
+		SecretFiles:           []SecretFileHint{{Name: "aws", Path: "/run/secrets/aws", Env: "AWS_SHARED_CREDENTIALS_FILE"}},
+		CursorFragments:       []string{"**style:** prefer small changes", "**tests:** verify behavior"},
+		PresetFragment:        "Focus on maintainability.",
 		CompactThresholdRatio: 0.85,
 		CompactPreserveRecent: 4,
 		SessionID:             "sess-abc",
@@ -42,8 +55,20 @@ func TestIOTaskRoundTrip(t *testing.T) {
 	if got.NodeID != original.NodeID {
 		t.Errorf("NodeID = %q, want %q", got.NodeID, original.NodeID)
 	}
+	if got.Iteration != original.Iteration {
+		t.Errorf("Iteration = %d, want %d", got.Iteration, original.Iteration)
+	}
+	if got.SystemPromptMode != original.SystemPromptMode {
+		t.Errorf("SystemPromptMode = %d, want %d", got.SystemPromptMode, original.SystemPromptMode)
+	}
+	if !reflect.DeepEqual(got.UserContent, original.UserContent) {
+		t.Errorf("UserContent = %#v, want %#v", got.UserContent, original.UserContent)
+	}
 	if got.BaseDir != original.BaseDir {
 		t.Errorf("BaseDir = %q, want %q", got.BaseDir, original.BaseDir)
+	}
+	if got.RepoRoot != original.RepoRoot {
+		t.Errorf("RepoRoot = %q, want %q", got.RepoRoot, original.RepoRoot)
 	}
 	if got.WorkDir != original.WorkDir {
 		t.Errorf("WorkDir = %q, want %q", got.WorkDir, original.WorkDir)
@@ -56,6 +81,21 @@ func TestIOTaskRoundTrip(t *testing.T) {
 	}
 	if got.MaxTokens != original.MaxTokens {
 		t.Errorf("MaxTokens = %d, want %d", got.MaxTokens, original.MaxTokens)
+	}
+	if got.Ultracode != original.Ultracode {
+		t.Errorf("Ultracode = %v, want %v", got.Ultracode, original.Ultracode)
+	}
+	if got.SecretsHygiene != original.SecretsHygiene {
+		t.Errorf("SecretsHygiene = %v, want %v", got.SecretsHygiene, original.SecretsHygiene)
+	}
+	if !reflect.DeepEqual(got.SecretFiles, original.SecretFiles) {
+		t.Errorf("SecretFiles = %#v, want %#v", got.SecretFiles, original.SecretFiles)
+	}
+	if !reflect.DeepEqual(got.CursorFragments, original.CursorFragments) {
+		t.Errorf("CursorFragments = %#v, want %#v", got.CursorFragments, original.CursorFragments)
+	}
+	if got.PresetFragment != original.PresetFragment {
+		t.Errorf("PresetFragment = %q, want %q", got.PresetFragment, original.PresetFragment)
 	}
 	if got.HasTools != original.HasTools {
 		t.Errorf("HasTools = %v", got.HasTools)
