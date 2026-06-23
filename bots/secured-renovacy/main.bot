@@ -2919,6 +2919,13 @@ fi
 # JS tool's universal cache-dir set.
 if git status --porcelain -- . ':(exclude)go' ':(exclude)target' ':(exclude).cargo' ':(exclude)node_modules' ':(exclude).yarn/cache' ':(exclude).yarn/unplugged' ':(exclude).yarn/install-state.gz' ':(exclude)__pycache__' ':(exclude).venv' ':(exclude)venv' ':(exclude).cache' ':(exclude).iterion' | grep -q .; then
   git add -A >&2
+# Belt-and-suspenders (Revi review finding): git add -A respects .gitignore, so
+# ignored caches at ANY depth (node_modules, go/, target/, …) are already skipped
+# — that's the primary guard and why the brittle :(exclude) pathspec form was
+# dropped. This unstages any NON-gitignored stray cache dir that still slipped in
+# (top-level + nested). git reset is lenient (no error on absent paths) and the
+# single-quoted :(glob) pathspecs keep '(' out of sh.
+git reset -q -- 'go' 'target' '.cargo' 'node_modules' '.yarn' '.cache' '.iterion' '__pycache__' '.venv' 'venv' ':(glob)**/node_modules' ':(glob)**/__pycache__' ':(glob)**/.venv' 2>/dev/null || true
   if ! git diff --cached --quiet; then
     if ! git commit --amend --no-edit >&2; then
       printf '{"success":false,"output":"git commit --amend failed","sha":""}\n'
@@ -3117,6 +3124,13 @@ tool review_commit_auto:
 cd {{input.workspace_dir}} >&2
 # Cache-exclusion pathspecs (see commit_changes for rationale).
 git add -A >&2
+# Belt-and-suspenders (Revi review finding): git add -A respects .gitignore, so
+# ignored caches at ANY depth (node_modules, go/, target/, …) are already skipped
+# — that's the primary guard and why the brittle :(exclude) pathspec form was
+# dropped. This unstages any NON-gitignored stray cache dir that still slipped in
+# (top-level + nested). git reset is lenient (no error on absent paths) and the
+# single-quoted :(glob) pathspecs keep '(' out of sh.
+git reset -q -- 'go' 'target' '.cargo' 'node_modules' '.yarn' '.cache' '.iterion' '__pycache__' '.venv' 'venv' ':(glob)**/node_modules' ':(glob)**/__pycache__' ':(glob)**/.venv' 2>/dev/null || true
 if git diff --cached --quiet; then
   printf '{"success":true,"output":"no review fix changes"}\n'
 else
@@ -3593,6 +3607,13 @@ SUBJECT="chore(deps): batch update ${COUNT} patch upgrades"
 # any stray toolchain cache OUT of the staged set, regardless of
 # whether the sandbox env block was correctly applied upstream.
 git add -A >&2
+# Belt-and-suspenders (Revi review finding): git add -A respects .gitignore, so
+# ignored caches at ANY depth (node_modules, go/, target/, …) are already skipped
+# — that's the primary guard and why the brittle :(exclude) pathspec form was
+# dropped. This unstages any NON-gitignored stray cache dir that still slipped in
+# (top-level + nested). git reset is lenient (no error on absent paths) and the
+# single-quoted :(glob) pathspecs keep '(' out of sh.
+git reset -q -- 'go' 'target' '.cargo' 'node_modules' '.yarn' '.cache' '.iterion' '__pycache__' '.venv' 'venv' ':(glob)**/node_modules' ':(glob)**/__pycache__' ':(glob)**/.venv' 2>/dev/null || true
 if git diff --cached --quiet; then
   # yarn up resolved nothing (everything already at target). Soft
   # success: downstream routes to select_candidate via "not committed".
@@ -3998,6 +4019,13 @@ BODY=$(printf '%s' "$MEMBERS" | jq -r '.[] | "- \(.name // "?") \(.current // "?
 SUBJECT="chore(deps): update ${FAMILY}/* family (${COUNT} packages)"
 # Cache-exclusion pathspecs (see commit_changes for rationale).
 git add -A >&2
+# Belt-and-suspenders (Revi review finding): git add -A respects .gitignore, so
+# ignored caches at ANY depth (node_modules, go/, target/, …) are already skipped
+# — that's the primary guard and why the brittle :(exclude) pathspec form was
+# dropped. This unstages any NON-gitignored stray cache dir that still slipped in
+# (top-level + nested). git reset is lenient (no error on absent paths) and the
+# single-quoted :(glob) pathspecs keep '(' out of sh.
+git reset -q -- 'go' 'target' '.cargo' 'node_modules' '.yarn' '.cache' '.iterion' '__pycache__' '.venv' 'venv' ':(glob)**/node_modules' ':(glob)**/__pycache__' ':(glob)**/.venv' 2>/dev/null || true
 if git diff --cached --quiet; then
   printf '{"success":true,"committed":false,"output":"family yarn up produced no manifest changes","sha":""}\n'
   exit 0
