@@ -107,11 +107,21 @@ for the note path. The webhook's `LaunchVars` override these.
 
 ### GitHub (`POST /api/webhooks/github/{id}`)
 
-HMAC over the body, header `X-Hub-Signature-256` (`sha256=<hex>`). Only
-`pull_request` events with action `opened` or `reopened` trigger; ping
-/ push / issue_comment are silently filtered (returns 200 — a 4xx makes
-GitHub disable the webhook after repeated failures;
-[pkg/server/webhooks_github.go](../pkg/server/webhooks_github.go)).
+HMAC over the body, header `X-Hub-Signature-256` (`sha256=<hex>`). Three
+event paths trigger; ping / push / everything else is silently filtered
+(returns 200 — a 4xx makes GitHub disable the webhook after repeated
+failures; [pkg/server/webhooks_github.go](../pkg/server/webhooks_github.go)):
+
+- **`pull_request`** with action `opened` or `reopened` → PR auto-review.
+- **`issue_comment`** → the universal `/command` slash path (e.g.
+  `/featurly <prompt>`), routed through the command registry.
+- **`issues`** with action `labeled` → launches the webhook's bot with
+  the labeled issue turned into a feature task. The handler derives
+  `feature_prompt` (issue title + body), `open_mr=true`, and
+  `source_issue_ref` (the issue URL), so an implementer bot (featurly)
+  implements the issue, opens a PR, and comments the PR URL back onto the
+  issue. Scope which label fires with **`label_allowlist`** (below);
+  re-applying the same label is an idempotent replay.
 
 ### Forgejo / Gitea (`POST /api/webhooks/forgejo/{id}`)
 
@@ -170,7 +180,12 @@ Every webhook carries four filters
 
 - **`event_allowlist`** — provider-event names allowed; empty defaults
   to the provider's natural set (GitLab uses `{merge_request, note}`,
-  the others use `{pull_request}`). A bare `*` matches everything.
+  the others use `{pull_request}`, and the GitHub/Forgejo `issues`
+  path defaults to `{issues}`). A bare `*` matches everything.
+- **`label_allowlist`** — for the `issues` (labeled) path only: which
+  freshly-applied label fires (e.g. `["implement"]`). Empty = any label;
+  case-insensitive; a bare `*` matches everything. No effect on the
+  `pull_request` / `issue_comment` paths.
 - **`project_allowlist`** — `owner/repo` patterns. Empty = every project
   the forge fires for. Supports `*` (any), `owner/*`, or exact paths.
 - **`author_allowlist`** — PR/MR author logins allowed to trigger a

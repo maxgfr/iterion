@@ -61,6 +61,12 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		// comment. Routes through the command registry to its bot.
 		s.handlePRForgeComment(ctx, w, r, cfg, webhooks.ProviderGitHub, body, payloadHash, srcIP)
 		return
+	case prforge.EventHeaderIssues:
+		// Issue lifecycle path: labeling an issue (e.g. "implement") launches
+		// an implementer bot (featurly) that opens a PR back-linked to the
+		// issue. Distinct from the PR auto-review and slash-command paths.
+		s.handleGitHubIssueLabeled(w, r, cfg, body, payloadHash, srcIP)
+		return
 	case prforge.EventHeaderPullRequest:
 		// fall through to the PR auto-review path below.
 	default:
@@ -102,6 +108,86 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	vars := reviewPRVars(p.PRURL, p.TargetBranch, strings.TrimSpace(p.Title+"\n\n"+p.Description), cfg.LaunchVars, map[string]string{"pr_author": p.SenderLogin})
 
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
+}
+
+// handleGitHubIssueLabeled handles a verified inbound GitHub `issues`
+// delivery. Only the "labeled" action with a label that passes the
+// webhook's LabelAllowlist launches a bot; everything else is filtered
+// (200) so GitHub keeps the hook enabled. The launched bot (configured on
+// the webhook, e.g. featurly) gets feature_prompt/open_mr/source_issue_ref
+// so it implements the issue and opens a PR back-linked to it.
+func (s *Server) handleGitHubIssueLabeled(w http.ResponseWriter, r *http.Request, cfg webhooks.Config, body []byte, payloadHash, srcIP string) {
+	ctx := r.Context()
+	p, err := prforge.ParseIssues(body)
+	if err != nil {
+		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: "issues"}, webhooks.StatusInvalid, payloadHash, srcIP, err.Error())
+		httpError(w, http.StatusBadRequest, "invalid issues payload")
+		return
+	}
+	meta := prforgeIssueMeta(p)
+
+	// Only a labeled action whose label passes the allowlist auto-triggers.
+	// Project + event allowlists mirror the PR path; the label allowlist is
+	// the per-webhook gate that scopes to e.g. "implement".
+	if !p.IsLabeled() ||
+		!webhooks.MatchEvent(cfg.EventAllowlist, "issues", "issues") ||
+		!webhooks.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) ||
+		!webhooks.MatchLabel(cfg.LabelAllowlist, p.LabelName) {
+		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusFiltered, payloadHash, srcIP, "")
+		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
+		return
+	}
+
+	botID, ok := s.resolveReviewBot(ctx, w, cfg, meta, payloadHash, srcIP)
+	if !ok {
+		return
+	}
+
+	// Idempotency: one launch per (tenant, webhook, repo, issue#, label).
+	// Including the label means re-applying a DIFFERENT trigger label still
+	// launches, while re-applying the SAME label is a no-op replay.
+	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("gh|issue|%s|%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectPath, p.IssueNumber, p.LabelName)))
+
+	vars := issueLabeledVars(p, cfg.LaunchVars)
+
+	// repoRef empty → the runner clones the repo's default branch; featurly's
+	// worktree: auto branches from there.
+	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, "", payloadHash, srcIP)
+}
+
+// issueLabeledVars composes the launch vars an implementer bot (featurly)
+// needs to turn a labeled issue into a back-linked PR: the issue
+// title+body as the feature prompt, open_mr to push+open the PR, and
+// source_issue_ref (the issue URL) so finalize_mr comments the PR URL back
+// onto the issue. Operator-pinned LaunchVars win last.
+func issueLabeledVars(p prforge.ParsedIssue, launchVars map[string]string) map[string]string {
+	vars := map[string]string{
+		"feature_prompt":   strings.TrimSpace(p.IssueTitle + "\n\n" + p.IssueBody),
+		"open_mr":          "true",
+		"source_issue_ref": p.IssueURL,
+	}
+	for k, v := range launchVars {
+		vars[k] = v
+	}
+	return vars
+}
+
+// prforgeIssueMeta flattens a parsed issues event into webhookEventMeta.
+// SubjectURL carries the issue's own URL (the back-link target); the
+// delivery row records the issue subject + the label that triggered it.
+func prforgeIssueMeta(p prforge.ParsedIssue) webhookEventMeta {
+	subject := ""
+	if p.IssueNumber != 0 {
+		subject = p.SubjectID()
+	}
+	return webhookEventMeta{
+		Kind:         "issues",
+		Action:       p.Action,
+		ProjectPath:  p.ProjectPath,
+		SubjectID:    subject,
+		SubjectURL:   p.IssueURL,
+		SenderHandle: p.SenderLogin,
+	}
 }
 
 // prforgePRMeta flattens a parsed PR-over-forge event (GitHub or

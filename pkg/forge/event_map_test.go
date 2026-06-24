@@ -18,6 +18,11 @@ func TestToNativeEvents(t *testing.T) {
 		{ProviderGitHub, all, []string{"issue_comment", "pull_request"}},
 		{ProviderForgejo, all, []string{"issue_comment", "pull_request"}},
 		{ProviderGitLab, []string{bundle.ForgeEventPullRequest}, []string{"merge_request"}},
+		// issue_labeled → github/forgejo "issues"; gitlab has no mapping (skipped).
+		{ProviderGitHub, []string{bundle.ForgeEventIssueLabeled}, []string{"issues"}},
+		{ProviderForgejo, []string{bundle.ForgeEventIssueLabeled}, []string{"issues"}},
+		{ProviderGitLab, []string{bundle.ForgeEventIssueLabeled}, nil},
+		{ProviderGitHub, []string{bundle.ForgeEventPullRequest, bundle.ForgeEventIssueLabeled}, []string{"issues", "pull_request"}},
 		{ProviderGitLab, []string{"bogus"}, nil},
 		{ProviderGitLab, []string{bundle.ForgeEventPullRequest, bundle.ForgeEventPullRequest}, []string{"merge_request"}}, // dedup
 	}

@@ -137,9 +137,15 @@ type Manifest struct {
 //	                         github / forgejo "pull_request"
 //	pull_request_comment  -> gitlab "note_events",
 //	                         github / forgejo "issue_comment"
+//	issue_labeled         -> github / forgejo "issues"
+//	                         (gitlab "issues_events" — not yet wired inbound)
 const (
 	ForgeEventPullRequest        = "pull_request"
 	ForgeEventPullRequestComment = "pull_request_comment"
+	// ForgeEventIssueLabeled subscribes the repo hook to the forge-native
+	// "issues" event; labeling an issue launches an implementer bot that
+	// opens a PR back-linked to the issue (see the GitHub issues handler).
+	ForgeEventIssueLabeled = "issue_labeled"
 )
 
 // DefaultForgeSecretName is the workflow-secret name an integration
@@ -154,6 +160,7 @@ const DefaultForgeSecretName = "forge_token"
 var KnownForgeEvents = map[string]bool{
 	ForgeEventPullRequest:        true,
 	ForgeEventPullRequestComment: true,
+	ForgeEventIssueLabeled:       true,
 }
 
 // knownForgeScopeKeys / knownForgeScopeLevels constrain a manifest

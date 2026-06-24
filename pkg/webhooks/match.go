@@ -71,6 +71,30 @@ func MatchAuthor(allowlist []string, login string) bool {
 	return false
 }
 
+// MatchLabel reports whether a freshly-applied issue label triggers a
+// launch under this webhook's LabelAllowlist. An empty allowlist means
+// "any label triggers" (the operator gates by which events the forge hook
+// subscribes to instead). Matching is case-insensitive and trims space, so
+// ["implement"] reacts to a "Implement" / "implement" label. A "*" entry is
+// an explicit allow-all; an empty applied label never matches a non-empty
+// allowlist (an unlabeled/edited event carries no label to match).
+func MatchLabel(allowlist []string, label string) bool {
+	if len(allowlist) == 0 {
+		return true
+	}
+	label = strings.TrimSpace(label)
+	for _, pat := range allowlist {
+		pat = strings.TrimSpace(pat)
+		if pat == "*" {
+			return true
+		}
+		if label != "" && strings.EqualFold(pat, label) {
+			return true
+		}
+	}
+	return false
+}
+
 func matchProjectPattern(pat, path string) bool {
 	pat = strings.TrimSpace(pat)
 	if pat == "" {

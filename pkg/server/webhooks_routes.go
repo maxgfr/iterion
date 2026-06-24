@@ -48,6 +48,7 @@ type webhookConfigReq struct {
 	ProjectAllowlist   []string          `json:"project_allowlist,omitempty"`
 	EventAllowlist     []string          `json:"event_allowlist,omitempty"`
 	AuthorAllowlist    []string          `json:"author_allowlist,omitempty"`
+	LabelAllowlist     []string          `json:"label_allowlist,omitempty"`
 	RateLimit          *webhooks.Rate    `json:"rate_limit,omitempty"`
 	MonthlyCallLimit   *int              `json:"monthly_call_limit,omitempty"`
 	LaunchVars         map[string]string `json:"launch_vars,omitempty"`
@@ -241,6 +242,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		ProjectAllowlist:   req.ProjectAllowlist,
 		EventAllowlist:     req.EventAllowlist,
 		AuthorAllowlist:    req.AuthorAllowlist,
+		LabelAllowlist:     req.LabelAllowlist,
 		RateLimit:          rate,
 		LaunchVars:         req.LaunchVars,
 		KeyOverrides:       req.KeyOverrides,
@@ -400,6 +402,9 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AuthorAllowlist != nil {
 		cfg.AuthorAllowlist = req.AuthorAllowlist
+	}
+	if req.LabelAllowlist != nil {
+		cfg.LabelAllowlist = req.LabelAllowlist
 	}
 	if req.RateLimit != nil {
 		cfg.RateLimit = *req.RateLimit

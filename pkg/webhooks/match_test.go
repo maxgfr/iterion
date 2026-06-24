@@ -75,3 +75,21 @@ func TestMatchAuthor(t *testing.T) {
 		t.Fatal("wildcard author must match")
 	}
 }
+
+func TestMatchLabel(t *testing.T) {
+	if !MatchLabel(nil, "implement") || !MatchLabel([]string{}, "anything") {
+		t.Fatal("empty allowlist allows any label")
+	}
+	if !MatchLabel([]string{"implement"}, "implement") || MatchLabel([]string{"implement"}, "bug") {
+		t.Fatal("exact match")
+	}
+	if !MatchLabel([]string{"implement"}, "Implement") {
+		t.Fatal("matching must be case-insensitive")
+	}
+	if !MatchLabel([]string{"*"}, "whatever") {
+		t.Fatal("bare wildcard matches any label")
+	}
+	if MatchLabel([]string{"implement"}, "") {
+		t.Fatal("empty applied label must not match a non-empty allowlist")
+	}
+}

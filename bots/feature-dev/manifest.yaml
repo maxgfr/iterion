@@ -29,7 +29,10 @@ dispatch_vars:
 ## The auto-provisioner requests these scopes and binds the connection
 ## token under `forge_token` (cross-ref main.bot `secrets: { forge_token }`).
 forge:
-  events: [pull_request_comment]
+  ## issue_labeled: labeling an issue (e.g. "implement") launches featurly
+  ## to implement it and open a PR back-linked to the issue.
+  ## pull_request_comment: the on-demand `/featurly <prompt>` slash command.
+  events: [issue_labeled, pull_request_comment]
   token_scopes:
     pull_requests: write     # open the MR/PR
     repository: write         # push the branch

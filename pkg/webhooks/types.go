@@ -103,6 +103,12 @@ type Config struct {
 	// "dependabot[bot]" / "renovate[bot]". Lets a webhook react ONLY to a
 	// dependency-bot's PRs while ignoring human PRs on the same repo.
 	AuthorAllowlist []string `bson:"author_allowlist,omitempty" json:"author_allowlist,omitempty"`
+	// LabelAllowlist restricts which freshly-applied issue label triggers a
+	// launch on the GitHub/Forgejo `issues` (labeled) path (e.g.
+	// ["implement"] so only that label dispatches the bot). Empty = any
+	// label triggers. Case-insensitive; see MatchLabel. Has no effect on the
+	// pull_request / issue_comment paths.
+	LabelAllowlist []string `bson:"label_allowlist,omitempty" json:"label_allowlist,omitempty"`
 
 	// ForgeBaseURL, when set, pins the forge instance this webhook's bot
 	// token may call back to (e.g. "https://gitlab.example.com"). The
