@@ -278,18 +278,6 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	}
 	caps := driver.Capabilities()
 
-	// User-declared host bind mounts (a bot's `sandbox.mounts:` with type=bind —
-	// e.g. a ~/.claude OAuth mount authored for the docker driver) cannot be
-	// honoured by a driver with no host filesystem (kubernetes: translateMounts
-	// rejects type=bind). Rather than hard-fail a bot written for docker, drop
-	// those entries with a warning; the sandboxed agent falls back to env-provided
-	// creds/config (in cloud the runner's LLM secret reaches the delegate, which
-	// forwards it into the sandbox exec). Docker keeps them (SupportsHostBindMounts
-	// is true there). Non-bind mounts (pvc/configmap/secret) always pass through.
-	if !caps.SupportsHostBindMounts {
-		spec.Mounts = dropHostBindMounts(spec.Mounts, logger)
-	}
-
 	// Configure all mounts BEFORE the driver prepares resources. Each
 	// helper is a silent no-op when its host source is missing, so
 	// callers don't have to guard.
@@ -316,6 +304,19 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	}
 	if err := addSecretFileMounts(ctx, spec, p.Workflow, p.SecretVars); err != nil {
 		return nil, err
+	}
+
+	// Drop any host bind mount the selected driver can't honour. Runs AFTER all
+	// mounts are configured so it catches BOTH a bot's `sandbox.mounts:` (e.g. a
+	// ~/.claude OAuth mount authored for docker) AND the runtime's own optional
+	// host binds (bundle / attachments / run-files). A driver with no host
+	// filesystem (kubernetes: SupportsHostBindMounts=false) would otherwise
+	// hard-fail manifest building on type=bind; instead we warn and drop, and the
+	// sandboxed agent falls back to env creds + the workspace mount (skills are
+	// mirrored into <workspace>/.claude). type=secret/pvc/configmap pass through;
+	// docker keeps everything (the capability is true there).
+	if !caps.SupportsHostBindMounts {
+		spec.Mounts = dropHostBindMounts(spec.Mounts, logger)
 	}
 
 	// Phase 4 V1: claw nodes are forwarded to the iterion-claw-runner
