@@ -1,13 +1,17 @@
 import { useEffect, useId, useRef } from "react";
 import { Cross2Icon } from "@radix-ui/react-icons";
 
-import { Button } from "@/components/ui/Button";
 import type { MarketplaceEntry } from "@/api/marketplace";
+import type { InstalledState } from "./installState";
+import { InstallControls } from "./InstallControls";
 
 interface Props {
   entry: MarketplaceEntry;
+  state: InstalledState;
   installing: boolean;
   onInstall: () => void;
+  onUpdate: () => void;
+  onUninstall: () => void;
   onClose: () => void;
 }
 
@@ -18,7 +22,15 @@ interface Props {
  *  carries the same keyboard / aria semantics (role=dialog, aria-modal,
  *  Escape closes, focus moves into the panel on open and restores on
  *  close). */
-export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Props) {
+export function MarketplaceDetail({
+  entry,
+  state,
+  installing,
+  onInstall,
+  onUpdate,
+  onUninstall,
+  onClose,
+}: Props) {
   const label = entry.display_name?.trim() || entry.name;
   const titleId = useId();
   const panelRef = useRef<HTMLElement | null>(null);
@@ -159,15 +171,13 @@ export function MarketplaceDetail({ entry, installing, onInstall, onClose }: Pro
           <span className="text-caption text-fg-subtle">
             Installs into <code className="text-fg-default">.botz/</code> — never run automatically.
           </span>
-          <Button
-            variant="success"
-            size="sm"
-            onClick={onInstall}
-            disabled={installing}
-            loading={installing}
-          >
-            {installing ? "Installing…" : "Install"}
-          </Button>
+          <InstallControls
+            state={state}
+            installing={installing}
+            onInstall={onInstall}
+            onUpdate={onUpdate}
+            onUninstall={onUninstall}
+          />
         </footer>
       </aside>
     </div>

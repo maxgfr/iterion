@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 
 import type { BotEntryWithSchema } from "@/api/bots";
-import { installBot } from "@/api/bots";
+import { installBot, uploadBotBundle } from "@/api/bots";
 import { useAuth } from "@/auth/AuthContext";
 import { Button, Dialog, Input } from "@/components/ui";
 import { botIdentity } from "@/lib/personas";
@@ -51,6 +51,27 @@ export function BotCatalogDialog({
   const [importRef, setImportRef] = useState("");
   const [importPath, setImportPath] = useState("");
   const [importing, setImporting] = useState(false);
+  const [uploadingBotz, setUploadingBotz] = useState(false);
+  const botzFileRef = useRef<HTMLInputElement | null>(null);
+
+  const onUploadBotz = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    setUploadingBotz(true);
+    try {
+      const res = await uploadBotBundle(file, { force: true });
+      addToast(
+        `Imported ${res.name} (${res.presets} presets, ${res.skills} skills) → ${res.installed_path}`,
+        "success",
+      );
+      await refetch();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Import failed", "error");
+    } finally {
+      setUploadingBotz(false);
+    }
+  };
 
   const onImport = async () => {
     const url = importUrl.trim();
@@ -135,16 +156,34 @@ export function BotCatalogDialog({
       <div className="mb-3 border-b border-border-default pb-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-medium text-fg-muted">
-            Import a bot from a repository
+            Import a bot from a repository or a <code className="text-fg-default">.botz</code> file
           </h3>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowImport((v) => !v)}
-            aria-expanded={showImport}
-          >
-            {showImport ? "Cancel" : "Import from repo…"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <input
+              ref={botzFileRef}
+              type="file"
+              accept=".botz"
+              className="hidden"
+              onChange={(e) => void onUploadBotz(e)}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => botzFileRef.current?.click()}
+              disabled={uploadingBotz}
+              loading={uploadingBotz}
+            >
+              {uploadingBotz ? "Importing…" : "Import .botz…"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowImport((v) => !v)}
+              aria-expanded={showImport}
+            >
+              {showImport ? "Cancel" : "Import from repo…"}
+            </Button>
+          </div>
         </div>
         {showImport && (
           <div className="mt-2 space-y-2">

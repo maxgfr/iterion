@@ -4,8 +4,10 @@ import {
   installMarketplaceBot,
   listMarketplace,
   submitMarketplaceBot,
+  uninstallMarketplaceBot,
   type MarketplaceEntry,
 } from "@/api/marketplace";
+import { listBots } from "@/api/bots";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useUIStore } from "@/store/ui";
@@ -14,6 +16,11 @@ import { toastError } from "@/lib/errorHints";
 import { MarketplaceCard } from "./MarketplaceCard";
 import { MarketplaceDetail } from "./MarketplaceDetail";
 import { MarketplaceSubmit } from "./MarketplaceSubmit";
+import {
+  buildInstalledVersions,
+  resolveInstalledState,
+  type InstalledVersions,
+} from "./installState";
 
 /** MarketplaceView is the hosted bot registry browse / submit / install
  *  surface. Mirrors the studio's other view conventions: page header,
@@ -28,18 +35,30 @@ export default function MarketplaceView() {
   const [tag, setTag] = useState("");
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<InstalledVersions>(new Map());
+
+  // Best-effort: reconcile the registry against the bots already in the
+  // workspace so cards can show Installed / Update. A failure (e.g. cloud
+  // mode where install is disabled anyway) just leaves the map empty.
+  const refreshInstalled = useCallback(async () => {
+    try {
+      setInstalled(buildInstalledVersions(await listBots()));
+    } catch {
+      setInstalled(new Map());
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await listMarketplace(search, tag);
+      const [list] = await Promise.all([listMarketplace(search, tag), refreshInstalled()]);
       setEntries(list);
     } catch (e) {
       toastError(addToast, e, "Failed to load marketplace");
     } finally {
       setLoading(false);
     }
-  }, [search, tag, addToast]);
+  }, [search, tag, addToast, refreshInstalled]);
 
   // Debounced refetch on search/tag changes so typing in the search box
   // doesn't fire a request per keystroke.
@@ -48,20 +67,37 @@ export default function MarketplaceView() {
     return () => window.clearTimeout(t);
   }, [refresh]);
 
-  const onInstall = async (e: MarketplaceEntry) => {
+  // install (force=false) and update (force=true) share a path — both
+  // copy the entry's bundle into .botz/, the only difference being whether
+  // an existing install is overwritten.
+  const onInstall = async (e: MarketplaceEntry, force = false) => {
     setInstalling(e.slug);
     try {
-      const res = await installMarketplaceBot(e.slug);
+      const res = await installMarketplaceBot(e.slug, force);
       addToast(
-        `Installed ${res.install.name} → ${res.install.installed_path}`,
+        `${force ? "Updated" : "Installed"} ${res.install.name} → ${res.install.installed_path}`,
         "success",
       );
       // Reflect the bumped install counter without a full refetch.
       setEntries((prev) =>
         prev?.map((x) => (x.slug === e.slug ? res.entry : x)) ?? prev,
       );
+      await refreshInstalled();
     } catch (err) {
-      toastError(addToast, err, "Install failed");
+      toastError(addToast, err, force ? "Update failed" : "Install failed");
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  const onUninstall = async (e: MarketplaceEntry) => {
+    setInstalling(e.slug);
+    try {
+      await uninstallMarketplaceBot(e.slug);
+      addToast(`Uninstalled ${e.name}`, "success");
+      await refreshInstalled();
+    } catch (err) {
+      toastError(addToast, err, "Uninstall failed");
     } finally {
       setInstalling(null);
     }
@@ -129,7 +165,7 @@ export default function MarketplaceView() {
           </div>
         </section>
 
-        <MarketplaceSubmit onSubmit={onSubmit} />
+        <MarketplaceSubmit onSubmit={onSubmit} onUploaded={() => void refresh()} />
 
         <section className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
@@ -156,8 +192,11 @@ export default function MarketplaceView() {
                 <MarketplaceCard
                   key={e.slug}
                   entry={e}
+                  state={resolveInstalledState(e, installed)}
                   installing={installing === e.slug}
                   onInstall={() => void onInstall(e)}
+                  onUpdate={() => void onInstall(e, true)}
+                  onUninstall={() => void onUninstall(e)}
                   onOpen={() => setActiveSlug(e.slug)}
                 />
               ))}
@@ -169,8 +208,11 @@ export default function MarketplaceView() {
       {active && (
         <MarketplaceDetail
           entry={active}
+          state={resolveInstalledState(active, installed)}
           installing={installing === active.slug}
           onInstall={() => void onInstall(active)}
+          onUpdate={() => void onInstall(active, true)}
+          onUninstall={() => void onUninstall(active)}
           onClose={() => setActiveSlug(null)}
         />
       )}

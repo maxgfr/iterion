@@ -193,3 +193,27 @@ export function installBot(req: InstallBotRequest): Promise<InstallBotResult> {
     body: JSON.stringify(req),
   });
 }
+
+/** uploadBotBundle imports a `.botz` archive into the workspace by
+ *  POSTing it as multipart/form-data to /api/v1/bots/upload. Uses a raw
+ *  fetch (not apiRequest) so the browser sets the multipart boundary
+ *  Content-Type itself. Local-mode only. `force` overwrites an existing
+ *  install (the "update" path); `name` overrides the manifest name. */
+export async function uploadBotBundle(
+  file: File,
+  opts: { force?: boolean; name?: string } = {},
+): Promise<InstallBotResult> {
+  const form = new FormData();
+  form.append("file", file);
+  if (opts.force) form.append("force", "true");
+  if (opts.name) form.append("name", opts.name);
+  const res = await fetch(`${BASE}/upload`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!res.ok) {
+    throw new Error(`upload failed (${res.status}): ${await res.text()}`);
+  }
+  return (await res.json()) as InstallBotResult;
+}

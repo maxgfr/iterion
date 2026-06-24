@@ -1,19 +1,30 @@
-import { Button } from "@/components/ui/Button";
-
 import type { MarketplaceEntry } from "@/api/marketplace";
+import type { InstalledState } from "./installState";
+import { InstallControls } from "./InstallControls";
 
 interface Props {
   entry: MarketplaceEntry;
+  state: InstalledState;
   installing: boolean;
   onInstall: () => void;
+  onUpdate: () => void;
+  onUninstall: () => void;
   onOpen: () => void;
 }
 
 /** MarketplaceCard renders one entry as a compact tile. The card is
- *  clickable (opens the detail panel); the install button stops
- *  propagation so it doesn't double-trigger the open. Styled to match
+ *  clickable (opens the detail panel); the action buttons stop
+ *  propagation so they don't double-trigger the open. Styled to match
  *  the catalog/launch surfaces' design tokens. */
-export function MarketplaceCard({ entry, installing, onInstall, onOpen }: Props) {
+export function MarketplaceCard({
+  entry,
+  state,
+  installing,
+  onInstall,
+  onUpdate,
+  onUninstall,
+  onOpen,
+}: Props) {
   const label = entry.display_name?.trim() || entry.name;
   return (
     <li
@@ -60,19 +71,13 @@ export function MarketplaceCard({ entry, installing, onInstall, onOpen }: Props)
           {entry.repo_url}
           {entry.ref ? `#${entry.ref}` : ""}
         </span>
-        <Button
-          variant="success"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            onInstall();
-          }}
-          disabled={installing}
-          loading={installing}
-          className="shrink-0"
-        >
-          {installing ? "Installing…" : "Install"}
-        </Button>
+        <InstallControls
+          state={state}
+          installing={installing}
+          onInstall={onInstall}
+          onUpdate={onUpdate}
+          onUninstall={onUninstall}
+        />
       </div>
     </li>
   );

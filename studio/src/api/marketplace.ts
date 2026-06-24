@@ -20,6 +20,14 @@ export interface MarketplaceEntryPreset {
   skills?: string[];
 }
 
+/** MarketplaceScope mirrors marketplace.Scope — who may browse an entry
+ *  once approved. Empty/absent reads as "public". */
+export type MarketplaceScope = "public" | "instance" | "org";
+
+/** MarketplaceStatus mirrors marketplace.Status. Empty/absent reads as
+ *  "approved" (legacy + local single-tenant entries). */
+export type MarketplaceStatus = "pending" | "approved" | "rejected";
+
 /** MarketplaceEntry is one listing in the hosted bot registry. */
 export interface MarketplaceEntry {
   slug: string;
@@ -37,6 +45,15 @@ export interface MarketplaceEntry {
   installs: number;
   created_at?: string;
   updated_at?: string;
+  // Multi-scope / moderation plumbing (cloud). Absent in local mode.
+  scope?: MarketplaceScope;
+  org_id?: string;
+  status?: MarketplaceStatus;
+  source?: "git" | "upload" | "builtin";
+  submitted_by?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  reject_reason?: string;
 }
 
 /** SubmitMarketplaceRequest is the wire body for
@@ -92,9 +109,25 @@ export function submitMarketplaceBot(req: SubmitMarketplaceRequest): Promise<Mar
 
 /** installMarketplaceBot installs the entry's bundle into the workspace
  *  (.botz/) and returns the install result + the entry with its bumped
- *  install counter. Local-mode only (server returns 403 in cloud mode). */
-export function installMarketplaceBot(slug: string): Promise<InstallMarketplaceResponse> {
-  return apiRequest<InstallMarketplaceResponse>(`${BASE}/bots/${encodeURIComponent(slug)}/install`, {
-    method: "POST",
-  });
+ *  install counter. Local-mode only (server returns 403 in cloud mode).
+ *  Pass `force` to overwrite an existing install — the "update" path. */
+export function installMarketplaceBot(
+  slug: string,
+  force = false,
+): Promise<InstallMarketplaceResponse> {
+  const suffix = force ? "?force=true" : "";
+  return apiRequest<InstallMarketplaceResponse>(
+    `${BASE}/bots/${encodeURIComponent(slug)}/install${suffix}`,
+    { method: "POST" },
+  );
+}
+
+/** uninstallMarketplaceBot removes the entry's bundle from the workspace
+ *  (.botz/) and returns the (unchanged) entry so the caller can flip the
+ *  card back to "Install". Local-mode only. */
+export function uninstallMarketplaceBot(slug: string): Promise<MarketplaceEntry> {
+  return apiRequest<MarketplaceEntry>(
+    `${BASE}/bots/${encodeURIComponent(slug)}/install`,
+    { method: "DELETE" },
+  );
 }

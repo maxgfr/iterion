@@ -1,7 +1,10 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 
+import { uploadBotBundle } from "@/api/bots";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { useUIStore } from "@/store/ui";
+import { toastError } from "@/lib/errorHints";
 
 interface Props {
   onSubmit: (req: {
@@ -10,6 +13,9 @@ interface Props {
     path?: string;
     tags?: string[];
   }) => Promise<void>;
+  /** Called after a successful .botz upload so the parent can re-reconcile
+   *  the installed-state of the cards. */
+  onUploaded?: () => void | Promise<void>;
 }
 
 /** MarketplaceSubmit is the inline form for adding a repository to the
@@ -17,17 +23,37 @@ interface Props {
  *  (botinstall.Inspect); we surface the validation result via the
  *  parent's toast. Collapsed by default to keep the browse list above
  *  the fold. */
-export function MarketplaceSubmit({ onSubmit }: Props) {
+export function MarketplaceSubmit({ onSubmit, onUploaded }: Props) {
+  const addToast = useUIStore((s) => s.addToast);
   const [expanded, setExpanded] = useState(false);
   const [url, setUrl] = useState("");
   const [ref, setRef] = useState("");
   const [path, setPath] = useState("");
   const [tagsRaw, setTagsRaw] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const urlId = useId();
   const refId = useId();
   const pathId = useId();
   const tagsId = useId();
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await uploadBotBundle(file, { force: true });
+      addToast(`Imported ${res.name} → ${res.installed_path}`, "success");
+      setExpanded(false);
+      await onUploaded?.();
+    } catch (err) {
+      toastError(addToast, err, "Import failed");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const reset = () => {
     setUrl("");
@@ -150,6 +176,35 @@ export function MarketplaceSubmit({ onSubmit }: Props) {
               loading={submitting}
             >
               {submitting ? "Submitting…" : "Submit"}
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <div className="h-px flex-1 bg-border-default" />
+            <span className="text-caption uppercase tracking-wide text-fg-subtle">or</span>
+            <div className="h-px flex-1 bg-border-default" />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-caption text-fg-subtle">
+              Import a packaged <code className="text-fg-default">.botz</code> bundle
+              directly into this workspace's <code className="text-fg-default">.botz/</code>.
+            </p>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".botz"
+              className="hidden"
+              onChange={(e) => void handleFile(e)}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              className="shrink-0"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              loading={uploading}
+            >
+              {uploading ? "Importing…" : "Import .botz file"}
             </Button>
           </div>
         </div>
