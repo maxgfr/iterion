@@ -925,6 +925,16 @@ var providerCredentialEnvVars = []string{
 	"AZURE_OPENAI_API_KEY",
 	"AZURE_OPENAI_ENDPOINT",
 	"ANTHROPIC_API_KEY",
+	// z.ai (GLM) drives claw's Anthropic provider through an
+	// Anthropic-compatible endpoint, so a sandboxed claw reviewer (e.g.
+	// anthropic/glm-5.2 — the forfait-friendly reviewer model, since claw
+	// can't use the Claude Code OAuth forfait) needs the z.ai creds inside
+	// the container. registry.go synthesises the bearer + ZAIDefaultBaseURL
+	// from ZAI_API_KEY when no other anthropic auth is present;
+	// ANTHROPIC_AUTH_TOKEN/ANTHROPIC_BASE_URL cover the explicit BYOK path.
+	"ZAI_API_KEY",
+	"ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_BASE_URL",
 	"GEMINI_API_KEY",
 	"GOOGLE_API_KEY",
 	"GROQ_API_KEY",
