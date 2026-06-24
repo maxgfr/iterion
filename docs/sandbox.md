@@ -526,8 +526,11 @@ Architecture:
 - The pod's PID 1 is `sleep infinity`; subsequent delegate calls
   (claude_code / claw / tool nodes) reach in via `kubectl exec`.
 - Workspace is provided by an `emptyDir` volume mounted at
-  `/workspace`. Phase 5 V1 doesn't clone source from a remote;
-  the runner's WorkDir is the bind-mount source.
+  `/workspace`, populated at pod start (V2) by tar-streaming the run's
+  workspace (`RunInfo.WorkspacePath`) in via `kubectl exec` — the driver
+  has no host filesystem to bind-mount, so it copies. A git worktree's
+  `.git` is a pointer file, so the *clone root* is copied (real `.git` +
+  `origin`) so the sandboxed bot can commit and push.
 - Cleanup deletes the pod (and its emptyDir) on run exit.
 
 Security defaults applied to every sibling pod:

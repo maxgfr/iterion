@@ -1,11 +1,14 @@
 package kubernetes
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -288,6 +291,19 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		return nil, fmt.Errorf("kubernetes: wait for pod ready: %w", err)
 	}
 
+	// Phase 5 V2: the kubernetes driver has no host filesystem to
+	// bind-mount, so the run's workspace (RunInfo.WorkspacePath — the
+	// runner's clone/worktree) is COPIED into the pod's emptyDir /workspace
+	// via a tar stream. Without this the sandbox starts with an empty
+	// workspace (the V1 limitation, docs/sandbox.md) and a repo-bound bot
+	// has nothing to work on. Skipped for workspace-less runs.
+	if info.WorkspacePath != "" {
+		if err := r.populateWorkspace(ctx, info.WorkspacePath, p.workspace); err != nil {
+			_ = r.Cleanup(ctx)
+			return nil, fmt.Errorf("kubernetes: populate workspace: %w", err)
+		}
+	}
+
 	if p.spec.PostCreate != "" {
 		if err := r.runPostCreate(ctx, p.spec.PostCreate); err != nil {
 			_ = r.Cleanup(ctx)
@@ -453,6 +469,70 @@ func (r *Run) Cleanup(_ context.Context) error {
 func (r *Run) runPostCreate(ctx context.Context, snippet string) error {
 	r.driver.logger.Info("sandbox: running postCreateCommand in pod %s", r.podName)
 	return sandbox.RunPostCreate(ctx, r, snippet, r.driver.logger)
+}
+
+// populateWorkspace copies the run's host workspace into the pod's
+// /workspace emptyDir by streaming a tar archive through `kubectl exec`.
+// The kubernetes driver can't bind-mount (no host filesystem), so this is
+// the "or copy" half of RunInfo.WorkspacePath's contract; Phase 5 V1 left
+// /workspace empty (docs/sandbox.md).
+//
+// hostSrc is typically a git worktree whose `.git` is a *file* pointing
+// back to the runner's clone — useless once detached from it. We copy the
+// clone root instead (resolveCloneRoot), which carries a real `.git`
+// (objects + the `origin` remote), so the sandboxed bot can commit and
+// push (finalize_mr) against the real remote. The clone's checkout is the
+// same base commit as the worktree.
+func (r *Run) populateWorkspace(ctx context.Context, hostSrc, podDst string) error {
+	src := resolveCloneRoot(ctx, hostSrc)
+	r.driver.logger.Info("sandbox: copying workspace %s into pod %s:%s", src, r.podName, podDst)
+
+	hostTar := exec.CommandContext(ctx, "tar", "-C", src, "-cf", "-", ".")
+	podTar := kubectlCmdContext(ctx, "--namespace", r.namespace,
+		"exec", "-i", r.podName, "--", "tar", "-C", podDst, "-xf", "-")
+
+	pipe, err := hostTar.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("tar stdout pipe: %w", err)
+	}
+	podTar.Stdin = pipe
+	var hostErr, podErr bytes.Buffer
+	hostTar.Stderr = &hostErr
+	podTar.Stderr = &podErr
+
+	if err := podTar.Start(); err != nil {
+		return fmt.Errorf("start in-pod tar: %w", err)
+	}
+	if err := hostTar.Run(); err != nil {
+		_ = podTar.Wait()
+		return fmt.Errorf("host tar %s: %w\n%s", src, err, strings.TrimSpace(hostErr.String()))
+	}
+	if err := podTar.Wait(); err != nil {
+		return fmt.Errorf("in-pod tar extract: %w\n%s", err, strings.TrimSpace(podErr.String()))
+	}
+	return nil
+}
+
+// resolveCloneRoot returns the standalone clone directory for a host
+// workspace. For a git worktree (whose `.git` is a pointer file) it
+// returns the parent of the shared common git dir — the real clone the
+// runner made. For a plain clone or a non-git dir it returns hostSrc
+// unchanged. Best-effort: any git failure falls back to hostSrc.
+func resolveCloneRoot(ctx context.Context, hostSrc string) string {
+	out, err := exec.CommandContext(ctx, "git", "-C", hostSrc,
+		"rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	if err != nil {
+		return hostSrc
+	}
+	commonDir := strings.TrimSpace(string(out))
+	if commonDir == "" {
+		return hostSrc
+	}
+	// commonDir is "<cloneRoot>/.git"; its parent is the clone root.
+	if root := filepath.Dir(commonDir); root != "" && root != "." {
+		return root
+	}
+	return hostSrc
 }
 
 // podNameFor maps a run ID to a deterministic pod name. The k8s API
