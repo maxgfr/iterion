@@ -309,7 +309,13 @@ func (s *Server) handleGitLabCommandNote(ctx context.Context, w http.ResponseWri
 	}
 	// "cmd|" prefix keeps the key space disjoint from the mr|/note| paths.
 	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("cmd|%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.SubjectID())))
-	s.dispatchInvocation(ctx, w, r, cfg, gitlabNoteMeta(p), idemKey, route, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
+	// An issue note has no MR source branch — the repo-bound bot works off the
+	// project default branch (finalize_mr cuts the MR branch from there).
+	ref := p.SourceBranch
+	if surface == "issue" {
+		ref = p.DefaultBranch
+	}
+	s.dispatchInvocation(ctx, w, r, cfg, gitlabNoteMeta(p), idemKey, route, vars, p.CloneURL, ref, payloadHash, srcIP)
 }
 
 // buildCommandVars composes the launch vars for a generic command on a GitLab

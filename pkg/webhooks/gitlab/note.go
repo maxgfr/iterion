@@ -130,6 +130,13 @@ func ParseNote(body []byte) (ParsedNote, error) {
 		AuthorID:       e.User.ID,
 		AuthorUsername: e.User.Username,
 	}
+	// GitLab note-hook payloads don't always carry project.git_http_url
+	// (issue notes in particular). Fall back to the project web URL + ".git",
+	// GitLab's canonical https clone URL, so a repo-bound bot triggered from an
+	// issue comment still gets a non-empty RepoURL to clone.
+	if p.CloneURL == "" && e.Project.WebURL != "" {
+		p.CloneURL = e.Project.WebURL + ".git"
+	}
 	if e.MergeRequest != nil {
 		p.MRIID = e.MergeRequest.IID
 		p.MRState = e.MergeRequest.State
