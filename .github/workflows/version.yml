@@ -10,6 +10,14 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+  schedule:
+    # Nightly auto-release: when there are unreleased commits since the last
+    # tag, bump + tag, which cascades to release.yml (binaries + chart) and
+    # brew-update.yml (Homebrew tap). Days with no new commits are skipped by
+    # the guard step below to avoid empty releases.
+    # 22:27 UTC ≈ 00:27 CET — artefacts land before the European morning.
+    # Tune the time to taste; this is the only nightly trigger in the chain.
+    - cron: "27 22 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,6 +31,7 @@ jobs:
   version:
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     runs-on: ubuntu-latest
     steps:
@@ -54,7 +63,25 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Skip nightly release when nothing changed
+        id: changes
+        if: github.event_name == 'schedule'
+        run: |
+          set -euo pipefail
+          LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          if [ -z "$LAST_TAG" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "no previous tag — releasing"
+          elif git log "${LAST_TAG}..HEAD" --oneline | grep -q .; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "commits since ${LAST_TAG} — releasing"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "no commits since ${LAST_TAG} — skipping nightly release"
+          fi
+
       - name: Run release-it
+        if: steps.changes.outputs.has_changes != 'false'
         env:
           # Use the token-bureau App token so the GitHub Release that
           # release-it creates carries an App identity. Releases created
