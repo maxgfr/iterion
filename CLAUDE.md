@@ -797,6 +797,7 @@ iterion dispatch <config.yaml> [--port]  # Long-running dispatcher (tracker → 
 iterion schedule add|list|remove|run|install|uninstall  # Cron recurring bots via the host crontab — no daemon (see docs/scheduling.md)
 iterion issue create|list|show|move|update|close|board  # Native kanban tracker
 iterion bots list [--paths <dir>] [--format json|markdown|skill]  # Discover .bot/.botz bundles (used by whats-next + dispatcher zero-config)
+iterion marketplace list|submit|install  # Hosted bot registry CLI (same <store-dir>/marketplace the studio reads)
 iterion bench asymptote [flags]         # Asymptote benchmark (see docs/asymptote-bench.md)
 iterion bundle init|pack                # Scaffold or pack a .botz bundle (see docs/bundles.md)
 iterion sandbox doctor [file] [--strict] [--target auto|cloud|local]  # Diagnose host sandbox prerequisites; --strict validates a run's full config pre-flight (see docs/sandbox.md)
