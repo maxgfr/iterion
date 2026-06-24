@@ -260,6 +260,18 @@ func RunStudio(ctx context.Context, opts StudioOptions, p *Printer) error {
 	// (the view stays hidden via MarketplaceEnabled=false).
 	if mp, mpErr := marketplace.NewJSONStore(filepath.Join(resolvedStoreDir, "marketplace")); mpErr == nil {
 		cfg.Marketplace = mp
+		// Seed the registry from the workspace's own bot bundles so the
+		// Marketplace view isn't empty on first open. Idempotent + best
+		// effort; user-submitted entries are never clobbered. Path is
+		// configurable (ITERION_MARKETPLACE_SEED_PATHS, comma-separated,
+		// workspace-relative) so this stays repo-agnostic — it surfaces
+		// whatever bots the target repo ships, defaulting to bots/.
+		seedPaths := marketplaceSeedPaths()
+		if n, sErr := SeedMarketplace(context.Background(), mp, SeedOptions{Paths: seedPaths, Workdir: dir}); sErr != nil {
+			logger.Warn("studio: marketplace seed failed: %v", sErr)
+		} else if n > 0 {
+			logger.Info("studio: seeded %d built-in bot(s) into the marketplace", n)
+		}
 	} else {
 		logger.Warn("studio: marketplace store init failed: %v — Marketplace view disabled this session", mpErr)
 	}

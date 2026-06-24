@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -141,6 +142,120 @@ func MarketplaceInstall(ctx context.Context, opts MarketplaceInstallOptions) (*b
 		refreshed = entry
 	}
 	return res, refreshed, nil
+}
+
+// marketplaceSeedPaths resolves the workspace-relative bundle roots to
+// seed from. Overridable via ITERION_MARKETPLACE_SEED_PATHS (comma-
+// separated); defaults to "bots". A value of "none" (or "-") disables
+// seeding entirely.
+func marketplaceSeedPaths() []string {
+	raw := strings.TrimSpace(os.Getenv("ITERION_MARKETPLACE_SEED_PATHS"))
+	if raw == "" {
+		return []string{"bots"}
+	}
+	if raw == "none" || raw == "-" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// SeedOptions configures SeedMarketplace.
+type SeedOptions struct {
+	// Paths are bundle source roots to index (e.g. ["bots"]). Resolved
+	// relative to Workdir when not absolute. Whatever bots the target
+	// repo ships under these paths become the seeded entries — the
+	// mechanism is repo-agnostic; it never assumes a specific layout.
+	Paths []string
+	// Workdir is the base for relative Paths (default: current dir).
+	Workdir string
+}
+
+// SeedMarketplace indexes the bundles discovered under opts.Paths as
+// builtin, pre-approved, public registry entries so the marketplace
+// isn't empty out of the box. It is idempotent and conservative:
+//   - a slug already owned by a user (git/upload source) is never
+//     clobbered;
+//   - a builtin entry is rewritten only when absent or its version
+//     drifted, so reseeding is a no-op and install counters survive
+//     (Upsert preserves Installs when the new entry carries 0).
+//
+// Returns the number of entries written (created or updated).
+func SeedMarketplace(ctx context.Context, store marketplace.Store, opts SeedOptions) (int, error) {
+	workdir := opts.Workdir
+	if workdir == "" {
+		if wd, err := os.Getwd(); err == nil {
+			workdir = wd
+		}
+	}
+	written := 0
+	for _, p := range opts.Paths {
+		root := p
+		if !filepath.IsAbs(root) {
+			root = filepath.Join(workdir, p)
+		}
+		if _, err := os.Stat(root); err != nil {
+			continue // a configured seed path that doesn't exist is fine
+		}
+		entries, err := botregistry.List(botregistry.ListOptions{Paths: []string{root}})
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsBundleDir {
+				continue
+			}
+			md, err := botinstall.Inspect(ctx, botinstall.Options{Source: e.Path})
+			if err != nil {
+				continue
+			}
+			slug := botregistry.NormalizeName(md.Name)
+			if slug == "" {
+				continue
+			}
+			existing, ok, _ := store.Get(ctx, slug)
+			if ok {
+				// Never clobber a user-submitted (git/upload) entry.
+				if marketplace.EffectiveSource(*existing) != marketplace.SourceBuiltin {
+					continue
+				}
+				// Unchanged builtin → skip the write.
+				if existing.Version == md.Version {
+					continue
+				}
+			}
+			now := time.Now().UTC().Format(time.RFC3339)
+			created := now
+			if ok && existing.CreatedAt != "" {
+				created = existing.CreatedAt
+			}
+			entry := marketplace.Entry{
+				Slug:        slug,
+				Name:        md.Name,
+				DisplayName: md.DisplayName,
+				Description: md.Description,
+				Author:      md.Author,
+				RepoURL:     e.Path,
+				Version:     md.Version,
+				README:      md.README,
+				Presets:     toMarketplacePresets(md.Presets),
+				Source:      marketplace.SourceBuiltin,
+				Status:      marketplace.StatusApproved,
+				Scope:       marketplace.ScopePublic,
+				CreatedAt:   created,
+				UpdatedAt:   now,
+			}
+			if err := store.Upsert(ctx, entry); err == nil {
+				written++
+			}
+		}
+	}
+	return written, nil
 }
 
 // normalizeMarketplaceTags strips blanks and de-dups (mirrors the
