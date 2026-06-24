@@ -486,25 +486,33 @@ print(json.dumps({'packages': packages, 'errors': errors}))
   input: eco_input
   output: heuristic_output
 
-## run_generic_heuristics is the deterministic supply-chain MALWARE scanner
-## (distinct from the per-ecosystem CVE scanners). It walks the installed
-## npm tree (node_modules — where real-world supply-chain malware ships) and
-## emits two high-signal, low-false-positive catalogue signals:
+## run_generic_heuristics is the deterministic supply-chain scanner. It emits
+## three signal families, all from a BARE checkout (no `npm/pip install` step):
+##   - vuln-db-known : `trivy fs --scanners vuln` over the workspace matches
+##                     every pinned version in go.mod / package-lock.json /
+##                     requirements.txt / Cargo.lock / Gemfile.lock etc.
+##                     against the OSV/GHSA/NVD DB. This is the CVE FLOOR that
+##                     makes the SCA real on a bare checkout — the per-ecosystem
+##                     npm-audit/pip-audit heuristics need an installed tree,
+##                     which a `git clone` does not have. One signal per
+##                     advisory, grouped one package entry per (eco,name,ver).
 ##   - install-hook  : a package.json lifecycle script (preinstall/install/
 ##                     postinstall/prepare) runs arbitrary code at install
-##                     time — the #1 npm malware vector.
+##                     time — the #1 npm malware vector (needs node_modules).
 ##   - locale-anomaly: a non-ASCII / homoglyph character in a package name.
 ##                     npm names are ASCII-only by registry rule, so ANY
 ##                     non-ASCII char is a typosquat/homoglyph attack.
-## Bounded (MAX_PKGS) so a huge node_modules can't blow the budget. The
-## code-pattern signals (eval-on-startup / base64-blob / network-on-import)
-## and py/go install-hook + typosquat-corpus remain pending — see
-## native:3a81df64. The reviewer validates each signal against the cited
-## evidence file.
+## Bounded (MAX_PKGS) so a huge node_modules can't blow the budget. trivy fs is
+## a UNIVERSAL (cross-ecosystem) lockfile scanner, not a per-language scanner —
+## it is the SCA companion to sec-audit-source's gitleaks/trivy/semgrep floor.
+## Still pending (native:3a81df64): code-pattern malware signals
+## (eval-on-startup / base64-blob / network-on-import) and a typosquat corpus.
+## The reviewer validates each signal against the cited evidence file.
 tool run_generic_heuristics:
-  command: `mkdir -p {{vars.scan_dir}} && WS={{vars.workspace_dir}} python3 -c "
+  command: `mkdir -p {{vars.scan_dir}} && (trivy fs --scanners vuln --quiet --format json --output {{vars.scan_dir}}/trivy.json {{vars.workspace_dir}} 2>/dev/null || true) && WS={{vars.workspace_dir}} SCAN_DIR={{vars.scan_dir}} python3 -c "
 import os, json
 ws = os.environ.get('WS', '.')
+scan_dir = os.environ.get('SCAN_DIR', '.')
 packages, errors = [], []
 HOOK_KEYS = ('preinstall', 'install', 'postinstall', 'prepare')
 MAX_PKGS = 3000
@@ -569,6 +577,45 @@ if os.path.isdir(nm):
             res = scan_pkg(os.path.join(p, 'package.json'), entry)
             if res:
                 packages.append(res)
+
+# --- trivy fs lockfile CVE scan (all ecosystems, NO install needed) ---
+# trivy fs --scanners vuln reads go.mod / package-lock.json / requirements.txt
+# / Cargo.lock / Gemfile.lock etc. and matches each pinned version against the
+# vuln DB. This is the deterministic CVE floor that makes the SCA real: the
+# per-ecosystem npm-audit/pip-audit heuristics need an installed tree, but a
+# bare checkout only has lockfiles. One vuln_db_known signal per advisory,
+# grouped into one package entry per (ecosystem, name, version).
+SEV = {'CRITICAL': 35, 'HIGH': 25, 'MEDIUM': 15, 'LOW': 8, 'UNKNOWN': 5}
+tp = os.path.join(scan_dir, 'trivy.json')
+try:
+    tdata = json.load(open(tp, encoding='utf-8'))
+except (OSError, ValueError):
+    tdata = None
+if isinstance(tdata, dict):
+    bypkg = {}
+    for res in (tdata.get('Results') or []):
+        eco = res.get('Type', '') or res.get('Class', '') or 'lockfile'
+        for v in (res.get('Vulnerabilities') or []):
+            if not isinstance(v, dict):
+                continue
+            name = v.get('PkgName', '')
+            ver = v.get('InstalledVersion', '')
+            if not name:
+                continue
+            sev = (v.get('Severity') or 'UNKNOWN').upper()
+            w = SEV.get(sev, 5)
+            vid = v.get('VulnerabilityID', '')
+            title = (v.get('Title') or v.get('Description') or '')[:160]
+            sig = {'type': 'vuln-db-known', 'weight': w, 'advisory': vid,
+                   'severity': sev.lower(), 'fixed_version': v.get('FixedVersion', ''),
+                   'aliases': [u for u in (v.get('References') or [])[:3]],
+                   'evidence': '%s (%s): %s [trivy:%s]' % (vid, sev, title, tp)}
+            bypkg.setdefault((eco, name, ver), []).append(sig)
+    for (eco, name, ver), sigs in bypkg.items():
+        packages.append({'ecosystem': eco, 'name': name, 'version': ver,
+                         'heuristic_score': min(100, sum(s['weight'] for s in sigs)),
+                         'signals': sigs})
+
 print(json.dumps({'packages': packages, 'errors': errors}))
 " > {{vars.scan_dir}}/generic.json; cat {{vars.scan_dir}}/generic.json`
   output: heuristic_output

@@ -741,12 +741,17 @@ iterion schedule install            # splices a managed block into `crontab`, CR
 ```
 
 Note: `sec-audit-source` (SAST) is production-ready (cap_findings +
-scan_health hardened). `sec-audit-deps` (SCA) is currently
-**enumerate + LLM-review only** — its heuristic scanner layer is still a
-scaffold that runs the real CVE scanners but discards their output
-(tracked: native:3a81df64); a run self-labels with a "⚠ Coverage"
-banner. Schedule it if you want the LLM-review pass, but don't read it as
-a complete dependency audit until that ticket lands.
+scan_health hardened). `sec-audit-deps` (SCA) now has a **real CVE floor**:
+`run_generic_heuristics` runs `trivy fs --scanners vuln` over the workspace,
+matching every pinned version in go.mod / package-lock.json / requirements.txt
+/ Cargo.lock etc. against the OSV/GHSA/NVD DB **from a bare checkout** (no
+`npm/pip install` needed) — validated producing 10 corroborated CVEs on a
+`lodash@4.17.4` lockfile, zero false positives. The per-ecosystem npm-audit/
+pip-audit heuristics still need an installed tree, and the code-pattern /
+typosquat-corpus malware signals remain pending (native:3a81df64), so a run
+still banners partial coverage — but it is no longer a 0-finding scaffold.
+(In a sandboxed run the board MCP is unavailable, so findings land in the
+markdown report, not the board, until C082's HTTP board path lands.)
 
 Each cron line routes through `iterion schedule run <name>`, which
 re-reads `~/.iterion/schedules.yaml` so the manifest stays authoritative;
