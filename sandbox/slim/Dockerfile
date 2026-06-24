@@ -57,6 +57,17 @@ RUN mkdir -p /workspace && chown -R devbox:devbox /workspace
 # Dockerfile go-builder) so it runs as-is on this devbox/debian base.
 COPY --from=iterion-bin /usr/local/bin/iterion /usr/local/bin/iterion
 
+# Bake the LLM CLIs (claude_code) so claude_code-backed bots don't install them
+# per-run. The per-run path is `sudo npm install -g @anthropic-ai/claude-code`
+# (the npm global prefix is root-owned), but the kubernetes sandbox pod runs
+# runAsNonRoot with allowPrivilegeEscalation=false, so sudo can't escalate and
+# the bot's post_create exits 1. Reuse the iterion image's pinned llm-clis
+# (docker/llm-clis: claude-code 2.1.175) and symlink `claude` onto PATH; it runs
+# on this image's node 22. With `claude` present, post_create's `claude --version`
+# check passes and the sudo branch is skipped (docker + k8s alike).
+COPY --from=iterion-bin /opt/iterion/llm-clis/node_modules /opt/iterion/llm-clis/node_modules
+RUN ln -sf /opt/iterion/llm-clis/node_modules/.bin/claude /usr/local/bin/claude
+
 # Numeric UID (not the `devbox` name) so the image runs under platforms
 # that forbid non-numeric / root-capable users (OpenShift `restricted`
 # SCC, k8s `runAsNonRoot`). uid 1000 == devbox.
