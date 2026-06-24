@@ -1161,8 +1161,33 @@ func (r *Runner) prepareRepoWorkspace(ctx context.Context, msg *queue.RunMessage
 			return "", err
 		}
 	}
+	// Cloud sandboxes have no ~/.gitconfig (the host bind-mount is dropped on
+	// kubernetes and the runner pod has none of its own), so seed a default
+	// author/committer in the clone's LOCAL config. It travels into the sandbox
+	// with .git, so commit-producing bots (feature-dev's commit_changes, willy,
+	// billy, docs-refresh, …) don't fail "Author identity unknown". Overridable
+	// via ITERION_GIT_AUTHOR_NAME / ITERION_GIT_AUTHOR_EMAIL.
+	_ = r.runGit(ctx, dir, "", "config", "user.name", gitAuthorName())
+	_ = r.runGit(ctx, dir, "", "config", "user.email", gitAuthorEmail())
 	r.cfg.Logger.Info("runner: cloned %s@%s for run %s", msg.RepoURL, msg.RepoSHA, msg.RunID)
 	return dir, nil
+}
+
+// gitAuthorName / gitAuthorEmail are the identity seeded into a cloud clone's
+// local git config so an in-sandbox `git commit` has an author even though no
+// ~/.gitconfig is mounted. Overridable per-deployment.
+func gitAuthorName() string {
+	if v := strings.TrimSpace(os.Getenv("ITERION_GIT_AUTHOR_NAME")); v != "" {
+		return v
+	}
+	return "iterion"
+}
+
+func gitAuthorEmail() string {
+	if v := strings.TrimSpace(os.Getenv("ITERION_GIT_AUTHOR_EMAIL")); v != "" {
+		return v
+	}
+	return "iterion@users.noreply.github.com"
 }
 
 // validateRepoTarget gates the webhook-sourced clone URL and ref before
