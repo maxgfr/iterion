@@ -45,6 +45,19 @@ export type { TooltipProps } from "./Tooltip";
 export { Popover, PopoverClose } from "./Popover";
 export type { PopoverProps } from "./Popover";
 
+export {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "./DropdownMenu";
+export type {
+  DropdownMenuProps,
+  DropdownMenuItemProps,
+  DropdownMenuSubProps,
+} from "./DropdownMenu";
+
 export { Dialog, DialogClose } from "./Dialog";
 export type { DialogProps } from "./Dialog";
 

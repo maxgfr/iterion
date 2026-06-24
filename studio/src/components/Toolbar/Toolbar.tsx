@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useDocumentStore } from "@/store/document";
 import { useUIStore } from "@/store/ui";
+import { useRecentsStore } from "@/store/recents";
 import { useBackendDetectStore } from "@/store/backendDetect";
+import * as api from "@/api/client";
 import ConfirmDialog from "../shared/ConfirmDialog";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Spinner } from "@/components/ui/Spinner";
@@ -13,20 +15,24 @@ import {
   Select,
   Dialog,
   Input,
-  Popover,
-  PopoverClose,
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSeparator,
 } from "@/components/ui";
 import ToolbarGroup from "./ToolbarGroup";
 import { useDocumentFileOps } from "./useDocumentFileOps";
 import {
   FilePlusIcon,
-  Pencil2Icon,
   DownloadIcon,
   UploadIcon,
   CopyIcon,
   ResetIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ClockIcon,
+  RocketIcon,
+  TrashIcon,
   CheckCircledIcon,
   EyeOpenIcon,
   ExclamationTriangleIcon,
@@ -61,15 +67,39 @@ export default function Toolbar() {
   const toggleLayoutDirection = useUIStore((s) => s.toggleLayoutDirection);
   const canvasActions = useUIStore((s) => s.canvasActions);
 
+  // FilePicker modal stays the searchable cross-source picker for the
+  // blank-canvas tile and the Cmd+K command palette; the File menu below
+  // no longer opens it (Open… is now the native OS picker).
   const filePickerOpen = useUIStore((s) => s.filePickerOpen);
   const setFilePickerOpen = useUIStore((s) => s.setFilePickerOpen);
+  const recents = useRecentsStore((s) => s.recents);
+  const clearRecents = useRecentsStore((s) => s.clearRecents);
   const hasResolvedBackend = useBackendDetectStore((s) => !!s.report?.resolved_default);
   // `report != null` once the host probe has returned (success or fail) —
   // gates the missing-credential nudge so it doesn't flash during the boot probe.
   const backendProbed = useBackendDetectStore((s) => s.report != null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  // Examples list for the File menu submenu — fetched lazily the first
+  // time the menu opens (same source as FilePicker), then cached.
+  const [examples, setExamples] = useState<string[] | null>(null);
+  const [examplesLoading, setExamplesLoading] = useState(false);
   const { confirm, dialog: confirmDialog } = useConfirm();
+
+  // Open… and Ctrl+O both trigger the native OS file picker (merged with
+  // the former "Import" action). Recents/Examples below keep binding the
+  // workspace path so Save/Run stay enabled.
+  const openNative = () => fileInputRef.current?.click();
+
+  const loadExamples = () => {
+    if (examples !== null || examplesLoading) return;
+    setExamplesLoading(true);
+    api
+      .listExamples()
+      .then((e) => setExamples(e))
+      .catch(() => setExamples([]))
+      .finally(() => setExamplesLoading(false));
+  };
 
   // Document/file ops (New, Open, Save, Save As, Import, Download, Copy,
   // Validate, Add/Remove workflow). The hook owns the local UI state
@@ -111,7 +141,7 @@ export default function Toolbar() {
         handleSave();
       } else if ((e.ctrlKey || e.metaKey) && e.key === "o") {
         e.preventDefault();
-        setFilePickerOpen(true);
+        fileInputRef.current?.click();
       } else if (e.key === "?" && !(e.target as HTMLElement).matches("input, textarea, select")) {
         e.preventDefault();
         setShowShortcuts(true);
@@ -119,7 +149,7 @@ export default function Toolbar() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [undo, redo, handleSave, setFilePickerOpen]);
+  }, [undo, redo, handleSave]);
 
   const workflows = document?.workflows ?? [];
 
@@ -127,10 +157,12 @@ export default function Toolbar() {
     <div className="flex items-center gap-1 px-4 h-10 text-sm bg-surface-1 border-b border-border-default">
       {/* File menu (VSCode-style unified dropdown) + inline primary Save */}
       <ToolbarGroup>
-        <Popover
+        <DropdownMenu
           side="bottom"
           align="start"
-          contentClassName="p-1 min-w-[220px]"
+          onOpenChange={(open) => {
+            if (open) loadExamples();
+          }}
           trigger={
             <Button
               variant="secondary"
@@ -143,53 +175,80 @@ export default function Toolbar() {
             </Button>
           }
         >
-          <div className="flex flex-col">
-            <FileMenuItem
-              icon={<FilePlusIcon />}
-              label="New"
-              shortcut="Ctrl+N"
-              onSelect={handleNew}
-            />
-            <FileMenuItem
-              icon={<Pencil2Icon />}
-              label="Open…"
-              shortcut="Ctrl+O"
-              onSelect={() => setFilePickerOpen(true)}
-            />
-            <MenuSeparator />
-            <FileMenuItem
-              icon={<DownloadIcon />}
-              label="Save"
-              shortcut="Ctrl+S"
-              onSelect={handleSave}
-              disabled={!document}
-            />
-            <FileMenuItem
-              icon={<DownloadIcon />}
-              label="Save As…"
-              onSelect={handleSaveAsRequest}
-              disabled={!document}
-            />
-            <MenuSeparator />
-            <FileMenuItem
-              icon={<UploadIcon />}
-              label="Import workflow file"
-              onSelect={() => fileInputRef.current?.click()}
-            />
-            <FileMenuItem
-              icon={<DownloadIcon />}
-              label="Download as .bot"
-              onSelect={handleDownload}
-              disabled={!document}
-            />
-            <FileMenuItem
-              icon={<CopyIcon />}
-              label="Copy source to clipboard"
-              onSelect={handleCopySource}
-              disabled={!document}
-            />
-          </div>
-        </Popover>
+          <DropdownMenuItem icon={<FilePlusIcon />} shortcut="Ctrl+N" onSelect={handleNew}>
+            New
+          </DropdownMenuItem>
+          <DropdownMenuItem icon={<UploadIcon />} shortcut="Ctrl+O" onSelect={openNative}>
+            Open…
+          </DropdownMenuItem>
+          <DropdownMenuSub icon={<ClockIcon />} label="Open recent">
+            {recents.length === 0 ? (
+              <DropdownMenuItem disabled>No recent files</DropdownMenuItem>
+            ) : (
+              <>
+                {recents.map((path) => (
+                  <DropdownMenuItem
+                    key={path}
+                    onSelect={() => handlePickFile("file", path)}
+                  >
+                    {path}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem icon={<TrashIcon />} onSelect={clearRecents}>
+                  Clear recents
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuSub>
+          <DropdownMenuSub icon={<RocketIcon />} label="Examples">
+            {examplesLoading && examples === null ? (
+              <DropdownMenuItem disabled>Loading…</DropdownMenuItem>
+            ) : !examples || examples.length === 0 ? (
+              <DropdownMenuItem disabled>No examples available</DropdownMenuItem>
+            ) : (
+              examples.map((name) => (
+                <DropdownMenuItem
+                  key={name}
+                  onSelect={() => handlePickFile("example", name)}
+                >
+                  {name}
+                </DropdownMenuItem>
+              ))
+            )}
+          </DropdownMenuSub>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            icon={<DownloadIcon />}
+            shortcut="Ctrl+S"
+            disabled={!document}
+            onSelect={handleSave}
+          >
+            Save
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            icon={<DownloadIcon />}
+            disabled={!document}
+            onSelect={handleSaveAsRequest}
+          >
+            Save As…
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            icon={<DownloadIcon />}
+            disabled={!document}
+            onSelect={handleDownload}
+          >
+            Download as .bot
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            icon={<CopyIcon />}
+            disabled={!document}
+            onSelect={handleCopySource}
+          >
+            Copy source to clipboard
+          </DropdownMenuItem>
+        </DropdownMenu>
         <Button
           variant="primary"
           size="sm"
@@ -444,45 +503,6 @@ export default function Toolbar() {
       {confirmDialog}
     </div>
   );
-}
-
-function FileMenuItem({
-  icon,
-  label,
-  shortcut,
-  onSelect,
-  disabled,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  shortcut?: string;
-  onSelect: () => void;
-  disabled?: boolean;
-}) {
-  // PopoverClose closes the popover on activation; wrapping it around
-  // the menu button means each choice dismisses the menu automatically
-  // — no manual open-state plumbing on the parent.
-  const button = (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={disabled}
-      className="w-full flex items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-fg-default hover:bg-surface-2 focus:outline-none focus:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      <span className="text-fg-muted">{icon}</span>
-      <span className="flex-1">{label}</span>
-      {shortcut && (
-        <span className="text-caption text-fg-subtle font-mono">{shortcut}</span>
-      )}
-    </button>
-  );
-  // Disabled items don't dismiss the popover — let users keep
-  // exploring other menu entries without the menu collapsing.
-  return disabled ? button : <PopoverClose asChild>{button}</PopoverClose>;
-}
-
-function MenuSeparator() {
-  return <div className="my-1 h-px bg-border-default" aria-hidden />;
 }
 
 function FileStatusBadge({
