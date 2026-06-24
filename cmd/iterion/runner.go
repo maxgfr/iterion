@@ -199,6 +199,8 @@ func runRunner(cmd *cobra.Command, _ []string) error {
 		MemoryStore:       memStore,
 		OrgUsage:          orgUsageCounter,
 		BotsPaths:         botsPaths,
+		SandboxDefault:    cfg.Sandbox.Default,
+		SandboxHostState:  cfg.Sandbox.HostState,
 	})
 	if err != nil {
 		return fmt.Errorf("runner: build: %w", err)

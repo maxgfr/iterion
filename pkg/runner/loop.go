@@ -415,6 +415,16 @@ type Config struct {
 	// without it, system prompts referencing `.claude/skills/<x>.md`
 	// point at nothing in cloud runs. Empty → no bundle resolution.
 	BotsPaths []string
+
+	// SandboxDefault / SandboxHostState carry the operator's
+	// ITERION_SANDBOX_DEFAULT / ITERION_SANDBOX_HOST_STATE (cfg.Sandbox.*) into
+	// the engine. Without this the cloud runner read them (config/env.go) then
+	// dropped them: a bot's `sandbox: auto` on the kubernetes driver hard-errored
+	// on host_state=auto (no host fs to bind) even with
+	// ITERION_SANDBOX_HOST_STATE=none set, because the runner never wired the
+	// value the way pkg/cli/run.go does for `iterion run`.
+	SandboxDefault   string
+	SandboxHostState string
 }
 
 // Runner is the long-running consumer loop.
@@ -1031,6 +1041,13 @@ func (r *Runner) executeRun(ctx context.Context, msg *queue.RunMessage) error {
 		runtime.WithLogger(r.cfg.Logger),
 		runtime.WithWorkflowHash(msg.WorkflowHash),
 		runtime.WithWorkDir(workDir),
+		// Sandbox defaults from the operator config (ITERION_SANDBOX_DEFAULT /
+		// ITERION_SANDBOX_HOST_STATE). pkg/cli/run.go wires these for `iterion
+		// run`; the cloud runner must too — else cfg.Sandbox.* is read and
+		// dropped and a bot's `sandbox: auto` hard-errors on the kubernetes
+		// driver (host_state=auto has no host filesystem to bind).
+		runtime.WithSandboxDefault(r.cfg.SandboxDefault),
+		runtime.WithSandboxHostStateDefault(r.cfg.SandboxHostState),
 	}
 	// Bundle skills: a bot-qualified run mirrors its bundle's skills/ into
 	// <workspace>/.claude/skills exactly like a local `iterion run
