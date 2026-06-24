@@ -51,6 +51,11 @@ Dockerfile  text eol=lf
 *.otf       binary
 
 # Generated / vendored artifacts: leave alone for diffs.
-vendor/**          linguist-vendored
+# -text: store vendor byte-exact (no eol normalization). Without this the
+# global `* text=auto eol=lf` + per-extension rules (e.g. *.ps1 eol=crlf)
+# fight `go mod vendor`, which writes each module's NATIVE line endings —
+# producing perpetual drift on the CI vendor-check for files like the
+# azure-sdk *.ps1, wails *.go, and go-toast *.md.
+vendor/**          -text linguist-vendored
 pnpm-lock.yaml     linguist-generated
 go.sum             linguist-generated
