@@ -29,11 +29,11 @@ operator-visible `.iterion` store. Every run: `--merge-into none`,
 | sec-audit-deps | Depsy | ⚠ AMBER | runs clean, 0 findings (known SCA scaffold) |
 | evolve | Evoly | ❌ RED-known | gpt-5.5 forfait context overflow at aggregate_review |
 | devbox-setup | Devy | ❌ RED | reproducible claude_code cold-start hang in sandbox |
-| secured-renovacy | Renovacy | (running at writing) | safe-mode upgrades + Phase-2 review |
+| secured-renovacy | Renovacy | ✅ GREEN | safe-mode patch+minor → Phase-2 review → SBOM (e404438) |
 | revi-converse | — | n/a | needs a live forge MR thread; not run offline |
 | smoke | — | n/a | utility (no manifest); not a catalog bot |
 
-13 GREEN, 1 AMBER, 2 RED, 1 in-flight, 2 n/a.
+**14 GREEN, 1 AMBER, 2 RED, 2 n/a** — all 18 catalog bots run.
 
 ## Fixes landed (campaign branch, verified, FF to main — NOT pushed)
 
