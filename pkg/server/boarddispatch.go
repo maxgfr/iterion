@@ -137,6 +137,32 @@ func (d *boardDispatcher) warn(format string, args ...any) {
 // the run record until it terminates. Returns nil on a clean finish, an error
 // on failure or pause (the dispatcher then moves the card to blocked). The
 // tenant identity is stamped on ctx so the publisher seals credentials.
+// Reserved BotArgs keys carrying the repo a webhook-launched card targets.
+// ensureBoardCard stamps them; liftBoardRepo extracts them so they reach the
+// LaunchSpec (and not the bot as vars).
+const (
+	boardRepoURLKey = "__iterion_repo_url"
+	boardRepoRefKey = "__iterion_repo_ref"
+)
+
+// liftBoardRepo splits a card's BotArgs into (bot vars, repoURL, repoRef),
+// removing the reserved repo keys from the vars so they don't leak to the bot.
+func liftBoardRepo(botArgs map[string]string) (map[string]string, string, string) {
+	repoURL := botArgs[boardRepoURLKey]
+	if repoURL == "" {
+		return botArgs, "", ""
+	}
+	repoRef := botArgs[boardRepoRefKey]
+	vars := make(map[string]string, len(botArgs))
+	for k, v := range botArgs {
+		if k == boardRepoURLKey || k == boardRepoRefKey {
+			continue
+		}
+		vars[k] = v
+	}
+	return vars, repoURL, repoRef
+}
+
 func (s *Server) processBoardCard(ctx context.Context, tenant string, iss native.Issue) error {
 	if s.runs == nil {
 		return errors.New("run service unavailable")
@@ -149,11 +175,17 @@ func (s *Server) processBoardCard(ctx context.Context, tenant string, iss native
 	if err != nil {
 		return err
 	}
+	// A webhook-launched card carries its target repo in reserved BotArgs keys
+	// (ensureBoardCard) — the coordinator otherwise has no repo. Lift them into
+	// the LaunchSpec so the runner clones, and strip them from the bot's vars.
+	vars, repoURL, repoRef := liftBoardRepo(iss.BotArgs)
 	res, err := s.runs.Launch(ctx, runview.LaunchSpec{
 		FilePath: path,
 		Source:   source,
 		BotID:    iss.Bot,
-		Vars:     iss.BotArgs,
+		Vars:     vars,
+		RepoURL:  repoURL,
+		RepoRef:  repoRef,
 	})
 	if err != nil {
 		return err

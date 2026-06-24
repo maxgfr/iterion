@@ -94,13 +94,13 @@ func (s *Server) dispatchInvocation(
 				s.writeLaunchDenial(w, r, d)
 				return
 			}
-			s.ensureBoardCard(ctx, cfg, route, vars, meta, native.StateReady)
+			s.ensureBoardCard(ctx, cfg, route, vars, meta, native.StateReady, repoURL, repoRef)
 			s.markWebhookOutcome(cfg.Provider, webhooks.StatusAccepted)
 			writeJSONStatus(w, http.StatusAccepted, map[string]string{"status": "carded", "bot": route.BotID})
 			return
 		}
 		// No dispatcher: a tracking card (default inbox state) + direct launch.
-		s.ensureBoardCard(ctx, cfg, route, vars, meta, "")
+		s.ensureBoardCard(ctx, cfg, route, vars, meta, "", repoURL, repoRef)
 	}
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, route.BotID, vars, repoURL, repoRef, payloadHash, srcIP)
 }
@@ -111,7 +111,7 @@ func (s *Server) dispatchInvocation(
 // duplicate it. Best-effort — a board error never fails the command (the run
 // still launches). The card is assigned to the bot (Assignee + Bot) and
 // carries the command args as bot_args.
-func (s *Server) ensureBoardCard(ctx context.Context, cfg webhooks.Config, route webhooks.CommandRoute, vars map[string]string, meta webhookEventMeta, initialState string) {
+func (s *Server) ensureBoardCard(ctx context.Context, cfg webhooks.Config, route webhooks.CommandRoute, vars map[string]string, meta webhookEventMeta, initialState, repoURL, repoRef string) {
 	store := s.cfg.CloudBoardFor(cfg.TenantID)
 	if store == nil {
 		return
@@ -140,6 +140,17 @@ func (s *Server) ensureBoardCard(ctx context.Context, cfg webhooks.Config, route
 	if route.OpensMR && meta.SubjectURL != "" {
 		botArgs["open_mr"] = "true"
 		botArgs["source_issue_ref"] = meta.SubjectURL
+	}
+	// Repo-bound webhook command (issue-comment → MR): the cloud board
+	// coordinator launches from the card with no RepoURL of its own, so stamp
+	// the clone URL/ref into BotArgs under reserved keys. processBoardCard lifts
+	// them into LaunchSpec.RepoURL/RepoRef and strips them from the bot's vars,
+	// so the runner clones the repo before sandboxing.
+	if repoURL != "" {
+		botArgs[boardRepoURLKey] = repoURL
+		if repoRef != "" {
+			botArgs[boardRepoRefKey] = repoRef
+		}
 	}
 	body := fmt.Sprintf("Triggered by a /%s-style command on %s/%s.\n\n%s",
 		route.BotID, meta.ProjectPath, meta.SubjectID, strings.TrimSpace(vars["scope_notes"]))
