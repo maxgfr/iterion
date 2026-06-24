@@ -126,6 +126,16 @@ type Capabilities struct {
 	// the implicit workspace mount.
 	SupportsMounts bool
 
+	// SupportsHostBindMounts means the driver can bind-mount an
+	// arbitrary host path into the container (a [Spec.Mounts] entry with
+	// type=bind). True on docker/podman (shared host filesystem); false
+	// on kubernetes (pods have no host filesystem — translateMounts
+	// hard-rejects type=bind) and on noop (no container). The runtime
+	// gates host-convenience mounts — the claw/rtk runner binaries and
+	// the worktree .git — on this; where it's false those binaries are
+	// instead baked into the sandbox image.
+	SupportsHostBindMounts bool
+
 	// SupportsNetworkPolicy means the driver enforces
 	// [Spec.Network] rules. False on noop and on cloud V1 (where
 	// the runner pod is the sandbox and per-run policy isn't applied).

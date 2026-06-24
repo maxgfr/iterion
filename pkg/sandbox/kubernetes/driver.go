@@ -118,13 +118,14 @@ func (d *Driver) ProxyConfig() (string, string, error) {
 // honours the resource (Calico, Cilium, …).
 func (d *Driver) Capabilities() sandbox.Capabilities {
 	return sandbox.Capabilities{
-		SupportsImage:         true,
-		SupportsBuild:         false, // local-only feature; cloud users build via CI + sandbox.image:
-		SupportsMounts:        true,  // V2-7 — type=pvc / type=configmap / type=secret
-		SupportsNetworkPolicy: true,  // V2-5 — synthesised per-run; CNI must enforce
-		SupportsPostCreate:    true,
-		SupportsRemoteUser:    true,
-		SupportsTLSInspection: true, // per-run CA Secret mounted into the pod (not cluster-validated)
+		SupportsImage:          true,
+		SupportsBuild:          false, // local-only feature; cloud users build via CI + sandbox.image:
+		SupportsMounts:         true,  // V2-7 — type=pvc / type=configmap / type=secret
+		SupportsHostBindMounts: false, // pods have no host filesystem — type=bind is rejected; the iterion/rtk binaries are baked into the sandbox image
+		SupportsNetworkPolicy:  true,  // V2-5 — synthesised per-run; CNI must enforce
+		SupportsPostCreate:     true,
+		SupportsRemoteUser:     true,
+		SupportsTLSInspection:  true, // per-run CA Secret mounted into the pod (not cluster-validated)
 	}
 }
 

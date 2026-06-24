@@ -17,6 +17,14 @@
 # node, and those need to be available system-wide regardless of
 # what the user's devbox.json declares.
 
+# ITERION_IMAGE: the iterion image whose static `iterion` binary gets baked
+# onto PATH (see the COPY in the final stage). A global ARG (before any FROM)
+# so it can parameterize the puller stage. Defaults to the published :edge so a
+# bare local `docker build sandbox/slim` works; CI passes the matching tag
+# (:vX.Y.Z on a release, else :edge).
+ARG ITERION_IMAGE=ghcr.io/socialgouv/iterion:edge
+FROM ${ITERION_IMAGE} AS iterion-bin
+
 FROM jetpackio/devbox:latest
 
 USER root
@@ -39,6 +47,15 @@ RUN apt-get update \
 # /workspace is the canonical bind-mount target used by iterion's
 # docker driver (see pkg/sandbox/docker/driver.go DefaultWorkspace).
 RUN mkdir -p /workspace && chown -R devbox:devbox /workspace
+
+# Bake the iterion binary onto PATH (from the iterion-bin stage above). The
+# sandboxed `claw` backend shells out to `iterion __claw-runner` *inside* the
+# container. The docker driver bind-mounts the host binary
+# (pkg/runtime/sandbox_mounts.go addClawBinaryMount); the kubernetes driver has
+# no host filesystem — type=bind is rejected (SupportsHostBindMounts=false) — so
+# on k8s the binary must ship in the image. Static (CGO_ENABLED=0, see the root
+# Dockerfile go-builder) so it runs as-is on this devbox/debian base.
+COPY --from=iterion-bin /usr/local/bin/iterion /usr/local/bin/iterion
 
 # Numeric UID (not the `devbox` name) so the image runs under platforms
 # that forbid non-numeric / root-capable users (OpenShift `restricted`

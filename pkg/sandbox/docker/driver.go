@@ -142,13 +142,14 @@ func (d *Driver) ProxyConfig() (string, string, error) {
 // service needed.
 func (d *Driver) Capabilities() sandbox.Capabilities {
 	return sandbox.Capabilities{
-		SupportsImage:         true,
-		SupportsBuild:         true, // V2-6 — docker buildx build
-		SupportsMounts:        true,
-		SupportsNetworkPolicy: false, // Phase 3
-		SupportsPostCreate:    true,
-		SupportsRemoteUser:    true,
-		SupportsTLSInspection: true, // injects RunInfo.ProxyCACert via NODE_EXTRA_CA_CERTS
+		SupportsImage:          true,
+		SupportsBuild:          true, // V2-6 — docker buildx build
+		SupportsMounts:         true,
+		SupportsHostBindMounts: true,  // shared host filesystem — bind-mounts the host iterion/rtk binary + worktree .git
+		SupportsNetworkPolicy:  false, // Phase 3
+		SupportsPostCreate:     true,
+		SupportsRemoteUser:     true,
+		SupportsTLSInspection:  true, // injects RunInfo.ProxyCACert via NODE_EXTRA_CA_CERTS
 	}
 }
 

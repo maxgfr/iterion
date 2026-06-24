@@ -267,6 +267,17 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 		return nil, nil
 	}
 
+	// Select the driver up front: its capabilities decide which
+	// host-convenience mounts are even possible. selectSandboxDriver keys
+	// off spec.Mode + host availability only (not the mounts), so it's
+	// safe here; the mounts still land before driver.Prepare below, which
+	// is what the "configure mounts first" invariant requires.
+	driver, err := selectSandboxDriver(spec, logger)
+	if err != nil {
+		return nil, err
+	}
+	caps := driver.Capabilities()
+
 	// Configure all mounts BEFORE the driver prepares resources. Each
 	// helper is a silent no-op when its host source is missing, so
 	// callers don't have to guard.
@@ -281,9 +292,16 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	}
 	addOptionalBindMount(spec, p.BundleHostDir, p.BundleContainerPath, "/run/iterion/bundle", "bundle", true, logger)
 	applyHostStateMounts(spec, p.Workflow, p, emitEvent, logger)
-	addClawBinaryMount(spec, p.Workflow)
-	addRtkBinaryMount(spec)
-	addWorktreeGitMount(spec, p.WorktreeGitDir, logger)
+	// Host-convenience bind mounts — the claw/rtk runner binaries and the
+	// worktree .git — require a driver with a shared host filesystem. On
+	// kubernetes (SupportsHostBindMounts=false) type=bind is rejected at
+	// translateMounts; there the iterion/rtk binaries are baked into the
+	// sandbox image instead (see sandbox/*/Dockerfile).
+	if caps.SupportsHostBindMounts {
+		addClawBinaryMount(spec, p.Workflow)
+		addRtkBinaryMount(spec)
+		addWorktreeGitMount(spec, p.WorktreeGitDir, logger)
+	}
 	if err := addSecretFileMounts(ctx, spec, p.Workflow, p.SecretVars); err != nil {
 		return nil, err
 	}
@@ -298,11 +316,6 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 			"reason":         "claw nodes will run via iterion-claw-runner inside the container",
 			"limitations_v1": "no MCP servers, no mid-tool-loop ask_user — see docs/sandbox.md",
 		})
-	}
-
-	driver, err := selectSandboxDriver(spec, logger)
-	if err != nil {
-		return nil, err
 	}
 
 	if driver.Name() == "noop" {
