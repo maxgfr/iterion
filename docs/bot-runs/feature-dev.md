@@ -4,6 +4,18 @@ Autonomous end-to-end feature development: plan → act → `/simplify` →
 prepare_commit → alternating Claude/GPT review-fix loop → commit, in an isolated
 `worktree: auto`. See [bots/feature-dev/](../../bots/feature-dev/).
 
+## 2026-06-24 — issue-comment → improvement-MR e2e on preprod (run 019ef703)
+- Status: **partial** — the feature's TRIGGER half validated live on preprod (GitLab issue comment → `feature_dev` run launched); the bot run then failed on a pre-existing preprod infra gap, NOT the feature.
+- Versions: bot feature-dev 0.1.0 (+ new `finalize_mr` tail) · iterion preprod `:edge` @`0f1d8d670` (this work) · webhook-launched on the cloud runner (sandbox).
+- Method: shipped the issue-comment→improvement-MR feature (commit `0f1d8d670`); provisioned on preprod a gitlab webhook (`0b00720c`, wildcard) + a distinct project-194 bot PAT + `forge_token` bindings (feature-dev/whole-improve-loop/branch-improve-loop) on `devthejo/revi-playground` (194) + GitLab hook **#13**; posted `/featurly add a doc comment to fetch.go` on issue **!2**.
+- Result: GitLab Note Hook → preprod parsed it as an **ISSUE note** (the new code — old code dropped issue notes as "not a merge-request note"), resolved `/featurly` → feature-dev, launched run `019ef703`. The run FAILED at sandbox start: `network proxy: kubernetes: ITERION_POD_IP env var is empty; the runner pod manifest must inject it via downward API (status.podIP)`. No MR (never reached `finalize_mr`).
+- Value: HIGH for validation — proved the headline path (issue comment → deployed iterion → bot launch) end-to-end on real GitLab + preprod. The MR-generation half was proven separately by a local `finalize_mr` mechanics test against 194 (real MR opened + back-linked + cleaned up).
+- Findings / misses:
+  - **Trigger works on the deployed instance**: issue-note parse + `/featurly` route + bot launch all fire.
+  - **Hand-created webhook needs `wildcard_bots`**: a webhook created via `POST /api/teams/{id}/webhooks` with explicit bot_ids has an EMPTY CommandMap, so `/featurly` filtered as "no command route" until I PATCHed `wildcard_bots=true` (then the live registry discovery resolves it). Documented, but a footgun — consider having the manual create endpoint compute the CommandMap from bot_ids (parity with the forge orchestrator's `buildCommandMap`).
+- Engine/infra hardening (the real finding): **the iterion Helm chart's runner Deployment does not inject `ITERION_POD_IP` via the downward API (`status.podIP`)** → the k8s sandbox network proxy cannot start → EVERY sandboxed bot fails immediately on preprod (ovh-dev / chart `iterion` 0.14.0). Fix: add `env: [{name: ITERION_POD_IP, valueFrom: {fieldRef: {fieldPath: status.podIP}}}]` to the runner pod template. Blocks the deployed bot-run→MR e2e until fixed (a kubectl patch was correctly denied as a shared-infra change — needs operator consent).
+- Lessons for next run: after fixing `ITERION_POD_IP` + the `wildcard_bots` webhook, the deployed e2e is **one `/featurly` comment from completing** — provisioning was left in place (webhook `0b00720c`, hook #13, bindings, bot PAT; issue !2). Loop-guard is satisfied (distinct bot PAT identity ≠ commenter).
+
 ## 2026-06-23 — Verified Action recovery ladder, ADR-044 (run 019ef38d)
 - Status: **validated** — converged through the cross-family review loop to `done`; deliverable builds + all new tests green (verified independently in the worktree, anti-façade).
 - Versions: bot feature-dev 0.1.0 · iterion fresh static (campaign HEAD) · `claude_code`/opus · `worktree: auto` · `--merge-into none`.
