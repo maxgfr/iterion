@@ -171,3 +171,6 @@ charts/iterion/Chart.lock
 # default (report_path) — a per-run local artifact, not source. Ignore it when
 # dogfooding Revi on this repo (or point report_path at /tmp for a dry run).
 .review-pr/
+
+# Harness/editor backups of .claude.json — never commit (swept in by git add -A)
+**/.claude.json.backup.*
