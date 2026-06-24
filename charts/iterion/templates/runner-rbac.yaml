@@ -4,19 +4,21 @@
 # Phase 5 V1 grants the minimum surface needed for the kubernetes
 # sandbox driver (pkg/sandbox/kubernetes) to:
 #
-#   - kubectl apply  → create the per-run pod manifest
+#   - kubectl apply  → create the per-run pod manifest, the per-run
+#                      Secrets (`as: file` workflow secrets + proxy TLS CA)
+#                      and the per-run NetworkPolicy
 #   - kubectl wait   → block until the pod becomes Ready
 #   - kubectl exec   → run delegate commands inside the pod
-#   - kubectl delete → clean up on run exit
+#   - kubectl delete → clean up pod / secrets / networkpolicy on run exit
 #
 # All verbs are scoped to the runner's own namespace via Role +
 # RoleBinding (NOT ClusterRole) so a compromised runner can't
 # enumerate or mutate resources outside its blast radius.
 #
-# Phase 5 V2 will add `networkpolicies` to the verbs list so the
-# runner can synthesise per-run NetworkPolicy resources for
-# fine-grained egress filtering. Today the engine's CONNECT proxy
-# (Phase 3) handles egress at the application layer.
+# `networkpolicies` (V2-5) lets the runner synthesise a per-run
+# NetworkPolicy for fine-grained egress filtering (enforced only by a
+# NetworkPolicy-aware CNI); the engine's CONNECT proxy handles egress at
+# the application layer regardless.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -37,6 +39,16 @@ rules:
   - apiGroups: [""]
     resources: ["pods/status"]
     verbs: ["get"]
+  # Per-run Secrets: the driver creates an opaque Secret for the workflow's
+  # `as: file` secrets (forge_token, …) and another for the egress proxy's
+  # TLS-inspection CA, mounts them into the sandbox pod, then deletes them on
+  # cleanup (pkg/sandbox/kubernetes/driver.go BuildSecretFilesSecret + caInjection).
+  # `kubectl apply` does get→create/patch on the NAMED per-run Secret; no
+  # list/watch (the driver never enumerates Secrets — least privilege on a
+  # sensitive resource).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch", "delete"]
   # V2-5: per-run NetworkPolicy synthesis. Enforcement requires a
   # NetworkPolicy-aware CNI (Calico, Cilium, weave-net, kube-router…);
   # without one the resource still applies but is silently ignored.
