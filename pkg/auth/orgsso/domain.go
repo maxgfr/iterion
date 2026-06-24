@@ -112,6 +112,11 @@ type DomainStore interface {
 	// IsVerifiedForTenant reports whether domain is a VERIFIED claim of tenantID
 	// — the auto-link gate's lookup.
 	IsVerifiedForTenant(ctx context.Context, tenantID, domain string) (bool, error)
+	// TenantsForDomain returns the tenant ids that have VERIFIED the domain —
+	// the login screen's "discover an org's SSO from the user's email domain"
+	// lookup. Returns an empty slice (never an error) for an unclaimed domain so
+	// the providers endpoint stays a non-oracle.
+	TenantsForDomain(ctx context.Context, domain string) ([]string, error)
 }
 
 // ---- in-memory store ----
@@ -182,6 +187,27 @@ func (m *MemoryDomainStore) ListByTenant(_ context.Context, tenantID string) ([]
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *MemoryDomainStore) TenantsForDomain(_ context.Context, domain string) ([]string, error) {
+	domain = NormalizeDomain(domain)
+	if domain == "" {
+		return nil, nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	seen := make(map[string]struct{})
+	var out []string
+	for _, d := range m.rows {
+		if d.Domain == domain && d.Verified() {
+			if _, ok := seen[d.TenantID]; !ok {
+				seen[d.TenantID] = struct{}{}
+				out = append(out, d.TenantID)
+			}
+		}
+	}
+	sort.Strings(out)
 	return out, nil
 }
 

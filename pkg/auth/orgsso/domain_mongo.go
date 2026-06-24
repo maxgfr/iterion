@@ -102,6 +102,21 @@ func (s *MongoDomainStore) ListByTenant(ctx context.Context, tenantID string) ([
 	return out, nil
 }
 
+func (s *MongoDomainStore) TenantsForDomain(ctx context.Context, domain string) ([]string, error) {
+	domain = NormalizeDomain(domain)
+	if domain == "" {
+		return nil, nil
+	}
+	var out []string
+	if err := s.coll.Distinct(ctx, "tenant_id", bson.M{
+		"domain":      domain,
+		"verified_at": bson.M{"$ne": nil},
+	}).Decode(&out); err != nil {
+		return nil, fmt.Errorf("orgsso: distinct tenants for domain: %w", err)
+	}
+	return out, nil
+}
+
 func (s *MongoDomainStore) IsVerifiedForTenant(ctx context.Context, tenantID, domain string) (bool, error) {
 	domain = NormalizeDomain(domain)
 	if domain == "" {

@@ -1,5 +1,5 @@
 import { errorMessage } from "@/lib/errorHints";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { InlineBanner } from "@/components/ui/InlineBanner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -8,7 +8,17 @@ import { useConfirm } from "@/hooks/useConfirm";
 import ApiKeysPanel from "./ApiKeys";
 import OAuthConnections from "./OAuthConnections";
 import TokensPanel from "./TokensPanel";
-import { ApiError, changeMyPassword, revokeAllMySessions } from "@/api/auth";
+import {
+  ApiError,
+  changeMyPassword,
+  listProviders,
+  listSSOLinks,
+  revokeAllMySessions,
+  ssoLinkStartURL,
+  unlinkSSO,
+  type SSOLink,
+} from "@/api/auth";
+import { consumeQueryParams } from "@/lib/queryFlash";
 import { useAuth } from "@/auth/AuthContext";
 import { useServerInfoStore } from "@/store/serverInfo";
 import { useHeaderSlot } from "@/components/shared/useHeaderSlot";
@@ -23,6 +33,15 @@ export default function SettingsPage() {
   useHeaderSlot({
     left: <span className="text-sm font-semibold">Settings</span>,
   });
+
+  // The SSO link/callback bounces back here with ?sso_linked / ?sso_link_error.
+  // Land the user on the Profile tab where the connections live.
+  useEffect(() => {
+    const u = new URL(window.location.href);
+    if (u.searchParams.has("sso_linked") || u.searchParams.has("sso_link_error")) {
+      setTab("profile");
+    }
+  }, []);
 
   const showAuthTabs = serverInfo?.auth_required !== false;
 
@@ -60,6 +79,7 @@ export default function SettingsPage() {
                   <div className="text-warning-fg">You are a platform super-admin.</div>
                 )}
               </section>
+              {showAuthTabs && <ConnectedSSOSection userEmail={user?.email} />}
               {showAuthTabs && <ChangePasswordSection />}
               {showAuthTabs && <SignOutEverywhereSection />}
             </div>
@@ -67,6 +87,144 @@ export default function SettingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ConnectedSSOSection lists the SSO identities linked to the account and lets
+// the user connect a new one (the exit from the login "an account already
+// exists — link from settings" 409) or disconnect an existing one.
+function ConnectedSSOSection({ userEmail }: { userEmail?: string }) {
+  const [links, setLinks] = useState<SSOLink[] | null>(null);
+  const [connectable, setConnectable] = useState<
+    Array<{ name: string; display: string }>
+  >([]);
+  const [err, setErr] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{
+    tone: "success" | "danger";
+    text: string;
+  } | null>(null);
+  const { confirm, dialog } = useConfirm();
+
+  const loadLinks = () =>
+    void listSSOLinks()
+      .then((r) => setLinks(r.links))
+      .catch((e) => setErr(errorMessage(e)));
+
+  useEffect(() => {
+    loadLinks();
+    // Connectable providers depend only on the email domain (an org's Keycloak
+    // shows up without its slug), so they're fetched here — not on every link
+    // change.
+    void listProviders(userEmail ? { email: userEmail } : undefined)
+      .then((p) => setConnectable(p.providers))
+      .catch(() => setConnectable([]));
+    // Surface the post-link callback result, then clear the one-shot params.
+    const f = consumeQueryParams(["sso_linked", "sso_link_error"]);
+    if (f.sso_linked) {
+      setNotice({ tone: "success", text: `Connected ${f.sso_linked}.` });
+    } else if (f.sso_link_error) {
+      setNotice({
+        tone: "danger",
+        text:
+          f.sso_link_error === "already_linked"
+            ? "That SSO identity is already connected to a different account."
+            : "Couldn't connect that SSO identity. Please try again.",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userEmail]);
+
+  const linkedProviders = new Set((links ?? []).map((l) => l.provider));
+
+  const disconnect = async (l: SSOLink) => {
+    const ok = await confirm({
+      title: "Disconnect SSO?",
+      message: `Remove the ${l.provider} connection (${l.email ?? l.provider_user_id})? You can reconnect it later.`,
+      confirmLabel: "Disconnect",
+      confirmVariant: "danger",
+    });
+    if (!ok) return;
+    try {
+      await unlinkSSO(l.provider, l.provider_user_id);
+      setNotice({ tone: "success", text: `Disconnected ${l.provider}.` });
+      loadLinks(); // providers are domain-derived; only the link list changed
+    } catch (e) {
+      setErr(errorMessage(e));
+    }
+  };
+
+  return (
+    <section className="space-y-3 text-sm bg-surface-1 border border-border-subtle rounded p-4">
+      {dialog}
+      <div>
+        <h3 className="font-medium">SSO connections</h3>
+        <p className="text-xs text-fg-subtle mt-0.5">
+          Sign in faster by connecting a single sign-on identity to this account.
+        </p>
+      </div>
+
+      {notice && (
+        <InlineBanner tone={notice.tone} layout="inline">
+          {notice.text}
+        </InlineBanner>
+      )}
+      {err && (
+        <InlineBanner tone="danger" layout="inline">
+          {err}
+        </InlineBanner>
+      )}
+
+      {links === null ? (
+        <div className="text-xs text-fg-muted">Loading…</div>
+      ) : links.length === 0 ? (
+        <div className="text-xs text-fg-muted">No SSO identities connected yet.</div>
+      ) : (
+        <ul className="divide-y divide-border-subtle">
+          {links.map((l) => (
+            <li
+              key={`${l.provider}:${l.provider_user_id}`}
+              className="flex items-center justify-between py-2 gap-3"
+            >
+              <div className="min-w-0">
+                <div className="font-medium">{l.provider}</div>
+                {l.email && (
+                  <div className="text-xs text-fg-muted truncate">{l.email}</div>
+                )}
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void disconnect(l)}
+              >
+                Disconnect
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {connectable.filter((p) => !linkedProviders.has(p.name)).length > 0 && (
+        <div className="space-y-2 pt-1">
+          <div className="text-xs text-fg-subtle">Connect another</div>
+          <div className="flex flex-wrap gap-2">
+            {connectable
+              .filter((p) => !linkedProviders.has(p.name))
+              .map((p) => (
+                <Button
+                  key={p.name}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    window.location.href = ssoLinkStartURL(p.name);
+                  }}
+                >
+                  Connect {p.display}
+                </Button>
+              ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

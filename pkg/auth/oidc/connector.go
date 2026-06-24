@@ -65,6 +65,7 @@ type ExternalUser struct {
 // Sentinel errors raised by connectors. The HTTP layer maps them.
 var (
 	ErrUnknownProvider  = errors.New("oidc: unknown provider")
+	ErrProviderDisabled = errors.New("oidc: provider is disabled")
 	ErrStateNotFound    = errors.New("oidc: state expired or unknown")
 	ErrEmailMissing     = errors.New("oidc: provider returned no email")
 	ErrEmailNotVerified = errors.New("oidc: provider returned an unverified email")
@@ -101,6 +102,13 @@ type PendingAuth struct {
 	// global providers (github / google / the deployment "sso").
 	TenantID      string
 	OrgProviderID string
+
+	// LinkUserID is set when the flow was initiated by an already-authenticated
+	// user explicitly connecting this SSO identity to their account (the
+	// /api/auth/oidc/<provider>/link/start path). The callback then attaches the
+	// resolved external identity to this user instead of running the normal
+	// login/signup logic. Empty for an ordinary sign-in flow.
+	LinkUserID string
 }
 
 // StateStore is the persistence interface for PendingAuth records.

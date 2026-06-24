@@ -34,6 +34,55 @@ import (
 // the value. 10 min MaxAge matches the StateStore TTL.
 const oidcAgentBindingCookie = "iterion_oidc_agent"
 
+// SSO callback error codes. The OIDC callback is a top-level browser
+// navigation, so failures must NOT render as a bare API error page —
+// instead we redirect to the SPA login route with one of these stable
+// codes in `?sso_error=`, and the SPA maps it to a friendly message +
+// the right next step. The raw provider detail stays in the server log
+// (handleOIDCCallback) and is never reflected to the browser.
+const (
+	ssoErrUnknownProvider  = "unknown_provider"
+	ssoErrProviderDisabled = "disabled"
+	ssoErrProviderReturned = "provider_error"
+	ssoErrStateExpired     = "state_expired"
+	ssoErrAgentBinding     = "agent_binding"
+	ssoErrExchangeFailed   = "exchange_failed"
+	ssoErrLinkRequired     = "link_required"
+	ssoErrRestricted       = "restricted"
+	ssoErrLoginFailed      = "login_failed"
+)
+
+// redirectSSOError aborts an OIDC callback by redirecting the browser to the
+// SPA login screen with a stable `?sso_error=<code>` (plus optional context
+// like the provider display name), so the SPA can render a clean banner
+// instead of the user landing on a raw `400 Bad Request` API page. The target
+// is always a server-built relative `/login` path — never anything derived
+// from a user-supplied `next` — so this can't become an open redirect.
+func redirectSSOError(w http.ResponseWriter, r *http.Request, code string, extra url.Values) {
+	q := url.Values{}
+	q.Set("sso_error", code)
+	for k, vs := range extra {
+		for _, v := range vs {
+			if v != "" {
+				q.Add(k, v)
+			}
+		}
+	}
+	http.Redirect(w, r, "/login?"+q.Encode(), http.StatusFound)
+}
+
+// ssoErrorForAuth maps an auth-service login error to its SPA error code.
+func ssoErrorForAuth(err error) string {
+	switch {
+	case errors.Is(err, auth.ErrLinkRequiresConsent):
+		return ssoErrLinkRequired
+	case errors.Is(err, auth.ErrSSORestricted):
+		return ssoErrRestricted
+	default:
+		return ssoErrLoginFailed
+	}
+}
+
 // registerAuthRoutes wires every /api/auth/* and /api/teams/*
 // endpoint. Called from routes() when AuthService is non-nil.
 func (s *Server) registerAuthRoutes() {
@@ -90,6 +139,11 @@ func (s *Server) registerAuthRoutes() {
 	s.mux.Handle("POST /api/auth/me/team/{team_id}", s.requireAuth(http.HandlerFunc(s.handleSwitchTeam)))
 	s.mux.Handle("POST /api/me/password", s.requireAuth(http.HandlerFunc(s.handleChangeMyPassword)))
 	s.mux.Handle("POST /api/me/sessions/revoke-all", s.requireAuth(http.HandlerFunc(s.handleRevokeAllSessions)))
+	// Connected SSO identities (self-service): list, connect a new one (the exit
+	// from the 409 link-required dead-end), and disconnect one.
+	s.mux.Handle("GET /api/me/sso/links", s.requireAuth(http.HandlerFunc(s.handleListMySSOLinks)))
+	s.mux.Handle("GET /api/me/sso/{provider}/link/start", s.requireAuth(http.HandlerFunc(s.handleOIDCLinkStart)))
+	s.mux.Handle("DELETE /api/me/sso/links/{provider}/{subject}", s.requireAuth(http.HandlerFunc(s.handleUnlinkMySSO)))
 
 	// Team management.
 	s.mux.Handle("GET /api/teams", s.requireAuth(http.HandlerFunc(s.handleListTeams)))
@@ -469,17 +523,28 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		SignupMode string     `json:"signup_mode"`
 		Providers  []provider `json:"providers"`
 	}{SignupMode: s.cfg.SignupMode}
+	seen := make(map[string]struct{})
+	add := func(name, display string) {
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		out.Providers = append(out.Providers, provider{Name: name, Display: display})
+	}
 	if s.oidcRegistry != nil {
 		for _, c := range s.oidcRegistry.Enabled() {
-			out.Providers = append(out.Providers, provider{Name: c.Name(), Display: c.Display()})
+			add(c.Name(), c.Display())
 		}
 	}
-	// Per-org providers (a tenant's own Keycloak), addressed by org slug. An
-	// unknown/absent slug returns only the global providers — never 404 — so
-	// this anonymous endpoint is not an org-existence oracle.
-	if org := strings.TrimSpace(r.URL.Query().Get("org")); org != "" && s.orgSSO != nil {
-		if team, err := s.authStore().GetTeamBySlug(r.Context(), org); err == nil {
-			rows, _ := s.orgSSO.ListByTenantKind(r.Context(), team.ID, orgsso.KindOIDC)
+	// Per-org providers (a tenant's own Keycloak). The org is resolved EITHER
+	// from an explicit slug (?org=) OR — the friendlier default — from the
+	// user's email/domain (?email= / ?domain=) via the org's verified domains,
+	// so a user never has to know their org's slug. Both paths return only the
+	// global providers for an unknown org — never 404 — so this anonymous
+	// endpoint is not an org-existence oracle.
+	if s.orgSSO != nil {
+		for _, tenantID := range s.resolveOrgTenants(r) {
+			rows, _ := s.orgSSO.ListByTenantKind(r.Context(), tenantID, orgsso.KindOIDC)
 			for _, row := range rows {
 				if !row.Enabled {
 					continue
@@ -488,17 +553,72 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 				if disp == "" {
 					disp = "SSO"
 				}
-				out.Providers = append(out.Providers, provider{Name: row.OIDCSlug(), Display: disp})
+				add(row.OIDCSlug(), disp)
 			}
 		}
 	}
 	writeJSON(w, out)
 }
 
+// resolveOrgTenants returns the tenant ids whose per-org SSO should be offered
+// on the login screen, resolved from the request's ?org= slug and/or
+// ?email=/?domain= (matched against verified domains). Best-effort and
+// non-oracle: any miss yields no tenant rather than an error.
+func (s *Server) resolveOrgTenants(r *http.Request) []string {
+	var out []string
+	seen := make(map[string]struct{})
+	push := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	if org := strings.TrimSpace(r.URL.Query().Get("org")); org != "" {
+		if team, err := s.authStore().GetTeamBySlug(r.Context(), org); err == nil {
+			push(team.ID)
+		}
+	}
+	domain := strings.TrimSpace(r.URL.Query().Get("domain"))
+	if domain == "" {
+		domain = orgsso.EmailDomain(r.URL.Query().Get("email"))
+	}
+	if domain != "" && s.orgDomains != nil {
+		if tenants, err := s.orgDomains.TenantsForDomain(r.Context(), domain); err == nil {
+			for _, id := range tenants {
+				push(id)
+			}
+		}
+	}
+	return out
+}
+
 // ---- OIDC handlers ----
 
 func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("provider")
+	s.beginOIDCFlow(w, r, r.PathValue("provider"), "")
+}
+
+// handleOIDCLinkStart begins an SSO flow that, on completion, attaches the
+// resolved identity to the already-authenticated caller (the exit from the 409
+// "link requires consent" dead-end). It lives under /api/me/ — NOT the public
+// /api/auth/oidc/ namespace — so requireAuth runs and the caller is known. The
+// shared callback distinguishes the two via PendingAuth.LinkUserID.
+func (s *Server) handleOIDCLinkStart(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.FromContext(r.Context())
+	if !ok || id.UserID == "" {
+		httpError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	s.beginOIDCFlow(w, r, r.PathValue("provider"), id.UserID)
+}
+
+// beginOIDCFlow resolves the connector, persists PendingAuth and redirects to
+// the IdP authorize URL. linkUserID is empty for a sign-in flow and set to the
+// caller's user id for the connect-from-settings flow.
+func (s *Server) beginOIDCFlow(w http.ResponseWriter, r *http.Request, name, linkUserID string) {
 	c, tenantID, providerID, err := s.resolveConnector(r.Context(), name)
 	if err != nil {
 		httpError(w, http.StatusNotFound, "unknown provider")
@@ -510,7 +630,11 @@ func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirectURI := s.oidcRedirectURI(name)
-	next := safeNext(r.URL.Query().Get("next"))
+	// A link flow always returns to settings; only a sign-in honours ?next=.
+	next := ""
+	if linkUserID == "" {
+		next = safeNext(r.URL.Query().Get("next"))
+	}
 	authURL, err := c.AuthorizeURL(r.Context(), redirectURI, state, verifier)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "build authorize URL: %v", err)
@@ -531,6 +655,7 @@ func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
 		AgentBinding:  binding,
 		TenantID:      tenantID,
 		OrgProviderID: providerID,
+		LinkUserID:    linkUserID,
 	}); err != nil {
 		httpError(w, http.StatusInternalServerError, "persist state: %v", err)
 		return
@@ -588,9 +713,16 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("provider")
 	c, _, _, err := s.resolveConnector(r.Context(), name)
 	if err != nil {
-		httpError(w, http.StatusNotFound, "unknown provider")
+		// The callback is a top-level navigation, so surface failures as a
+		// friendly SPA banner rather than a bare API error page.
+		code := ssoErrUnknownProvider
+		if errors.Is(err, oidc.ErrProviderDisabled) {
+			code = ssoErrProviderDisabled
+		}
+		redirectSSOError(w, r, code, nil)
 		return
 	}
+	provQ := url.Values{"sso_provider": {c.Display()}}
 	if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
 		// Don't reflect the provider's error_description verbatim:
 		// some providers include server-side context (account ids,
@@ -601,22 +733,22 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("oidc callback error from %s: code=%s description=%q",
 				name, oauthErr, r.URL.Query().Get("error_description"))
 		}
-		httpError(w, http.StatusBadRequest, "oauth error: %s", oauthErr)
+		redirectSSOError(w, r, ssoErrProviderReturned, provQ)
 		return
 	}
 	state := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
 	if state == "" || code == "" {
-		httpError(w, http.StatusBadRequest, "missing state or code")
+		redirectSSOError(w, r, ssoErrStateExpired, provQ)
 		return
 	}
 	pending, err := s.oidcStates.Take(r.Context(), state)
 	if err != nil {
-		httpError(w, http.StatusBadRequest, "state expired or invalid")
+		redirectSSOError(w, r, ssoErrStateExpired, provQ)
 		return
 	}
 	if pending.Provider != name {
-		httpError(w, http.StatusBadRequest, "state/provider mismatch")
+		redirectSSOError(w, r, ssoErrStateExpired, provQ)
 		return
 	}
 	// Verify the user-agent binding cookie matches the one issued at
@@ -624,16 +756,33 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// compare avoids timing leaks on near-miss values. The cookie is
 	// cleared regardless of outcome — single-use semantics.
 	if pending.AgentBinding != "" {
-		c, cerr := r.Cookie(oidcAgentBindingCookie)
+		ck, cerr := r.Cookie(oidcAgentBindingCookie)
 		clearOIDCAgentBindingCookie(w, s.cfg.CookieDomain, s.cfg.CookieSecure)
-		if cerr != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(pending.AgentBinding)) != 1 {
-			httpError(w, http.StatusBadRequest, "agent binding mismatch")
+		if cerr != nil || subtle.ConstantTimeCompare([]byte(ck.Value), []byte(pending.AgentBinding)) != 1 {
+			redirectSSOError(w, r, ssoErrAgentBinding, provQ)
 			return
 		}
 	}
 	ext, err := c.ExchangeCode(r.Context(), code, pending.RedirectURI, pending.CodeVerifier)
 	if err != nil {
-		httpError(w, http.StatusBadRequest, "exchange: %v", err)
+		if s.logger != nil {
+			s.logger.Warn("oidc exchange failed for %s: %v", name, err)
+		}
+		redirectSSOError(w, r, ssoErrExchangeFailed, provQ)
+		return
+	}
+	// Link flow: an authenticated user is attaching this SSO identity to their
+	// existing account (started from /link/start). Attach and bounce back to
+	// settings instead of running login/signup.
+	if pending.LinkUserID != "" {
+		if err := s.authSvc.LinkExternalToUser(r.Context(), ext, pending.LinkUserID); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("oidc link failed for user %s via %s: %v", pending.LinkUserID, name, err)
+			}
+			http.Redirect(w, r, "/settings?sso_link_error="+url.QueryEscape(linkErrorCode(err)), http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, "/settings?sso_linked="+url.QueryEscape(c.Display()), http.StatusFound)
 		return
 	}
 	// Per-org flows drive the login from the tenant/provider stored in
@@ -647,7 +796,10 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		res, err = s.authSvc.LoginWithExternal(r.Context(), ext, r.UserAgent(), s.clientIP(r))
 	}
 	if err != nil {
-		httpError(w, mapAuthErrorStatus(err), "sso login: %v", err)
+		if s.logger != nil {
+			s.logger.Warn("sso login failed via %s: %v", name, err)
+		}
+		redirectSSOError(w, r, ssoErrorForAuth(err), provQ)
 		return
 	}
 	s.setAuthCookies(w, res.AccessToken, res.AccessExpires, res.RefreshToken, res.RefreshExpires)
@@ -656,6 +808,59 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		target = "/"
 	}
 	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// linkErrorCode maps a link-flow error to the SPA settings banner code.
+func linkErrorCode(err error) string {
+	if errors.Is(err, auth.ErrLinkAlreadyOwned) {
+		return "already_linked"
+	}
+	return "failed"
+}
+
+// ssoLinkView is the public shape of a connected SSO identity.
+type ssoLinkView struct {
+	Provider       string `json:"provider"`
+	ProviderUserID string `json:"provider_user_id"`
+	Email          string `json:"email,omitempty"`
+	CreatedAt      string `json:"created_at,omitempty"`
+}
+
+// handleListMySSOLinks returns the caller's connected SSO identities.
+func (s *Server) handleListMySSOLinks(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	links, err := s.authSvc.ListSSOLinks(r.Context(), id.UserID)
+	if err != nil {
+		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
+		return
+	}
+	out := struct {
+		Links []ssoLinkView `json:"links"`
+	}{Links: make([]ssoLinkView, 0, len(links))}
+	for _, l := range links {
+		v := ssoLinkView{Provider: l.Provider, ProviderUserID: l.ProviderUserID, Email: l.Email}
+		if !l.CreatedAt.IsZero() {
+			v.CreatedAt = l.CreatedAt.UTC().Format(time.RFC3339)
+		}
+		out.Links = append(out.Links, v)
+	}
+	writeJSON(w, out)
+}
+
+// handleUnlinkMySSO disconnects one of the caller's SSO identities.
+func (s *Server) handleUnlinkMySSO(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	provider := r.PathValue("provider")
+	subject := r.PathValue("subject")
+	if provider == "" || subject == "" {
+		httpError(w, http.StatusBadRequest, "provider and subject required")
+		return
+	}
+	if err := s.authSvc.UnlinkExternal(r.Context(), id.UserID, provider, subject); err != nil {
+		httpError(w, mapAuthErrorStatus(err), "%s", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) oidcRedirectURI(provider string) string {

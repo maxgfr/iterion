@@ -152,7 +152,14 @@ export function GitHubSection({
                   ))}
                 </Select>
               </div>
-              <Badge variant={g.verified ? "success" : "neutral"}>
+              <Badge
+                variant={g.verified ? "success" : "neutral"}
+                title={
+                  g.verified
+                    ? "iterion has confirmed you administer this GitHub org — the grant is live."
+                    : "Pending: connect this GitHub org under Integrations to verify control. Until then the grant is saved but inert."
+                }
+              >
                 {g.verified ? "verified" : "pending"}
               </Badge>
               {canManage && (
@@ -164,6 +171,12 @@ export function GitHubSection({
           ))
         )}
       </div>
+
+      {grants.some((g) => g.github_org.trim() === "") && (
+        <InlineBanner tone="warning" layout="inline">
+          A grant with an empty GitHub org won't be saved — fill it in or remove the row.
+        </InlineBanner>
+      )}
 
       {canManage && (
         <div className="space-y-3 border-t border-border-subtle pt-3">

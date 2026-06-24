@@ -113,13 +113,50 @@ export async function switchTeam(teamID: string): Promise<AuthResponse> {
   return send(`/auth/me/team/${encodeURIComponent(teamID)}`, { method: "POST" });
 }
 
-// listProviders returns the global SSO providers, plus — when an org slug is
-// supplied — that org's own enabled providers (its Keycloak). An unknown slug
-// returns only the globals (no org-existence oracle), so this is safe to call
-// speculatively as the user types.
-export async function listProviders(org?: string): Promise<ProvidersResponse> {
-  const qs = org ? `?org=${encodeURIComponent(org)}` : "";
-  return send(`/auth/providers${qs}`);
+// listProviders returns the global SSO providers, plus — when an email or org
+// slug is supplied — that org's own enabled providers (its Keycloak), resolved
+// from the email's verified domain or the explicit slug. An unknown
+// email/slug returns only the globals (no org-existence oracle), so this is
+// safe to call speculatively as the user types.
+export async function listProviders(opts?: {
+  email?: string;
+  org?: string;
+}): Promise<ProvidersResponse> {
+  const p = new URLSearchParams();
+  if (opts?.email) p.set("email", opts.email);
+  if (opts?.org) p.set("org", opts.org);
+  const qs = p.toString();
+  return send(`/auth/providers${qs ? `?${qs}` : ""}`);
+}
+
+// ---- Connected SSO identities (settings) ----
+
+export interface SSOLink {
+  provider: string;
+  provider_user_id: string;
+  email?: string;
+  created_at?: string;
+}
+
+export async function listSSOLinks(): Promise<{ links: SSOLink[] }> {
+  return send("/me/sso/links");
+}
+
+export async function unlinkSSO(
+  provider: string,
+  providerUserID: string,
+): Promise<void> {
+  await send(
+    `/me/sso/links/${encodeURIComponent(provider)}/${encodeURIComponent(providerUserID)}`,
+    { method: "DELETE" },
+  );
+}
+
+// ssoLinkStartURL is the top-level navigation that begins connecting a new SSO
+// identity to the signed-in account (the exit from the 409 link-required
+// dead-end). It's a GET redirect, so the caller assigns window.location.
+export function ssoLinkStartURL(provider: string): string {
+  return `${BASE}/me/sso/${encodeURIComponent(provider)}/link/start`;
 }
 
 export interface InvitationLookup {

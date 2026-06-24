@@ -55,8 +55,15 @@ func (s *Server) resolveConnector(ctx context.Context, slug string) (oidc.Connec
 		return nil, "", "", oidc.ErrUnknownProvider
 	}
 	row, err := s.orgSSO.Get(ctx, id)
-	if err != nil || row.Kind != orgsso.KindOIDC || !row.Enabled {
+	if err != nil || row.Kind != orgsso.KindOIDC {
 		return nil, "", "", oidc.ErrUnknownProvider
+	}
+	// A configured-but-disabled provider is distinct from a non-existent one:
+	// the callback maps ErrProviderDisabled to a "disabled" SPA banner so the
+	// user isn't told the provider is "unknown" when the admin merely toggled
+	// it off.
+	if !row.Enabled {
+		return nil, "", "", oidc.ErrProviderDisabled
 	}
 	conn, err := s.buildOrgOIDCConnector(row)
 	if err != nil {

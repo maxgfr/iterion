@@ -284,6 +284,60 @@ func (s *Service) LoginWithExternalForOrg(ctx context.Context, ext oidc.External
 	return s.issueLoginInTeam(ctx, u, tenantID, userAgent, ip)
 }
 
+// LinkExternalToUser attaches a freshly-authenticated external identity to an
+// already-signed-in user (the explicit-consent path that resolves the 409
+// ErrLinkRequiresConsent dead-end: log in with your password, then connect SSO
+// from settings). Idempotent if the identity is already this user's; refuses
+// with ErrLinkAlreadyOwned if it belongs to a different account so an SSO
+// identity can never be silently re-pointed.
+func (s *Service) LinkExternalToUser(ctx context.Context, ext oidc.ExternalUser, userID string) error {
+	if ext.Subject == "" {
+		return fmt.Errorf("auth: external user missing subject")
+	}
+	if ext.Email == "" {
+		return oidc.ErrEmailMissing
+	}
+	if _, err := s.store.GetUser(ctx, userID); err != nil {
+		return err
+	}
+	existing, err := s.store.GetOIDCLink(ctx, ext.Provider, ext.Subject)
+	if err == nil {
+		if existing.UserID != userID {
+			return ErrLinkAlreadyOwned
+		}
+		return nil // already linked to this user — no-op
+	}
+	if !errors.Is(err, identity.ErrNotFound) {
+		return err
+	}
+	return s.store.UpsertOIDCLink(ctx, identity.OIDCLink{
+		Provider:       ext.Provider,
+		ProviderUserID: ext.Subject,
+		UserID:         userID,
+		Email:          identity.NormalizeEmail(ext.Email),
+		CreatedAt:      s.now().UTC(),
+	})
+}
+
+// ListSSOLinks returns the SSO identities linked to a user, for the "connected
+// accounts" settings view.
+func (s *Service) ListSSOLinks(ctx context.Context, userID string) ([]identity.OIDCLink, error) {
+	return s.store.ListOIDCLinksByUser(ctx, userID)
+}
+
+// UnlinkExternal removes one SSO identity from a user. Ownership is enforced:
+// the link must belong to userID (a user can only detach their own identities).
+func (s *Service) UnlinkExternal(ctx context.Context, userID, provider, providerUserID string) error {
+	link, err := s.store.GetOIDCLink(ctx, provider, providerUserID)
+	if err != nil {
+		return err
+	}
+	if link.UserID != userID {
+		return identity.ErrNotFound
+	}
+	return s.store.DeleteOIDCLink(ctx, provider, providerUserID)
+}
+
 // grantMembership ensures userID has at least `role` in teamID. Grant-only: an
 // existing membership at an equal-or-higher role is left untouched (never
 // downgrade a manually-promoted user); a lower one is upgraded.

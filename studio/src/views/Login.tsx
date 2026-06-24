@@ -6,10 +6,60 @@ import { Input } from "@/components/ui/Input";
 import { useLocation } from "wouter";
 import { listProviders, register, type ProvidersResponse } from "@/api/auth";
 import { ApiError } from "@/api/auth";
+import { consumeQueryParams } from "@/lib/queryFlash";
 import { useAuth } from "@/auth/AuthContext";
 import { useServerInfoStore } from "@/store/serverInfo";
 
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/$/, "");
+
+// ssoErrorNotice maps a backend SSO callback error code (?sso_error=) to a
+// friendly, actionable banner. `warning` is recoverable-by-the-user;
+// `danger` is a hard failure to retry or report.
+function ssoErrorNotice(
+  code: string,
+  provider: string,
+): { tone: "warning" | "danger"; text: string } {
+  switch (code) {
+    case "link_required":
+      return {
+        tone: "warning",
+        text: `An account already exists with this email. Sign in with your password below, then connect ${provider} from Settings → Account.`,
+      };
+    case "restricted":
+      return {
+        tone: "warning",
+        text: `${provider} sign-in is limited to allow-listed teams, and yours didn't match. Ask your administrator for access.`,
+      };
+    case "disabled":
+      return {
+        tone: "warning",
+        text: "That SSO provider is currently turned off. Contact your administrator or sign in another way.",
+      };
+    case "unknown_provider":
+      return {
+        tone: "danger",
+        text: "That SSO provider is no longer available. Try signing in with your email and password.",
+      };
+    case "state_expired":
+      return {
+        tone: "warning",
+        text: "Your sign-in took too long or the link was reused. Please start again.",
+      };
+    case "agent_binding":
+      return {
+        tone: "warning",
+        text: "We couldn't safely complete that sign-in (it may have started in another browser). Please try again here.",
+      };
+    case "provider_error":
+    case "exchange_failed":
+    case "login_failed":
+    default:
+      return {
+        tone: "danger",
+        text: `${provider} sign-in didn't complete. Please try again, or use your email and password.`,
+      };
+  }
+}
 
 export default function Login() {
   const { signIn, status } = useAuth();
@@ -22,20 +72,52 @@ export default function Login() {
   const [invitation, setInvitation] = useState("");
   const [providers, setProviders] = useState<ProvidersResponse | null>(null);
   const [org, setOrg] = useState("");
+  const [showOrgInput, setShowOrgInput] = useState(false);
+  // One enum instead of parallel booleans: discovery is idle / fetching /
+  // failed, never an impossible combination.
+  const [discovery, setDiscovery] = useState<"idle" | "loading" | "error">("idle");
+  const [redirecting, setRedirecting] = useState(false);
+  const [ssoNotice, setSsoNotice] = useState<{
+    tone: "warning" | "danger";
+    text: string;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Refetch providers as the org slug changes (debounced): the response folds
-  // in that org's own SSO providers (its Keycloak) alongside the global ones.
-  // An unknown slug returns only the globals, so this is safe to call as typed.
+  // Discover SSO providers as the user types their email (or an explicit org
+  // slug), debounced. The backend folds an org's own SSO (its Keycloak) in
+  // alongside the global providers, resolving the org from the email's verified
+  // domain — so a user never has to know their org slug. An unknown
+  // email/domain returns only the globals (no org-existence oracle). One
+  // debounced path covers both the empty form (globals only) and a typed
+  // email, so pre-"@" keystrokes don't each fire a request.
+  const emailForDiscovery = email.includes("@") ? email.trim() : "";
+  const lookingUpOrg = emailForDiscovery !== "" || org.trim() !== "";
   useEffect(() => {
+    setDiscovery("loading");
     const t = setTimeout(() => {
-      void listProviders(org.trim() || undefined)
-        .then(setProviders)
-        .catch(() => setProviders(null));
-    }, 250);
+      void listProviders({
+        email: emailForDiscovery || undefined,
+        org: org.trim() || undefined,
+      })
+        .then((p) => {
+          setProviders(p);
+          setDiscovery("idle");
+        })
+        .catch(() => setDiscovery("error"));
+    }, 300);
     return () => clearTimeout(t);
-  }, [org]);
+  }, [emailForDiscovery, org]);
+
+  // Surface a friendly banner when the OIDC callback bounced back here with a
+  // stable ?sso_error= code (see pkg/server redirectSSOError). The raw provider
+  // detail stays server-side; this maps the code to an actionable message.
+  useEffect(() => {
+    const f = consumeQueryParams(["sso_error", "sso_provider"]);
+    if (f.sso_error) {
+      setSsoNotice(ssoErrorNotice(f.sso_error, f.sso_provider || "your provider"));
+    }
+  }, []);
 
   // Ensure serverInfo is loaded so we can gate the forgot-password link.
   useEffect(() => {
@@ -108,6 +190,7 @@ export default function Login() {
   };
 
   const oidcStart = (name: string) => {
+    setRedirecting(true);
     const next = encodeURIComponent(returnTo());
     window.location.href = `${BASE}/auth/oidc/${encodeURIComponent(name)}/start?next=${next}`;
   };
@@ -217,18 +300,18 @@ export default function Login() {
           <div className="text-xs uppercase tracking-wider text-fg-muted">
             Single sign-on
           </div>
-          <label htmlFor="login-org" className="sr-only">
-            Organization slug
-          </label>
-          <Input
-            size="md"
-            id="login-org"
-            placeholder="Organization slug (for your org's SSO)"
-            value={org}
-            onChange={(e) => setOrg(e.target.value)}
-            autoComplete="organization"
-          />
-          {(providers?.providers?.length ?? 0) > 0 ? (
+
+          {ssoNotice && (
+            <InlineBanner tone={ssoNotice.tone} layout="inline">
+              {ssoNotice.text}
+            </InlineBanner>
+          )}
+
+          {redirecting ? (
+            <div className="text-sm text-fg-muted py-1" aria-live="polite">
+              Redirecting to your provider…
+            </div>
+          ) : (providers?.providers?.length ?? 0) > 0 ? (
             <div className="space-y-2">
               {providers!.providers.map((p) => (
                 <Button
@@ -237,15 +320,57 @@ export default function Login() {
                   className="w-full"
                   onClick={() => oidcStart(p.name)}
                 >
-                  {p.display}
+                  Continue with {p.display}
                 </Button>
               ))}
             </div>
+          ) : discovery === "loading" && lookingUpOrg ? (
+            <div className="text-xs text-fg-muted">Looking for your organization's SSO…</div>
+          ) : discovery === "error" ? (
+            <InlineBanner tone="danger" layout="inline">
+              Couldn't reach the server to check for SSO. Check your connection
+              and try again.
+            </InlineBanner>
+          ) : lookingUpOrg ? (
+            <div className="text-xs text-fg-muted">
+              No SSO is configured for that {org.trim() ? "organization" : "email"}.
+              Use your password above, or try a different address.
+            </div>
           ) : (
-            org.trim() !== "" && (
-              <div className="text-xs text-fg-muted">No SSO providers for that organization.</div>
-            )
+            <div className="text-xs text-fg-muted">
+              Enter your work email above and your organization's SSO appears
+              here automatically.
+            </div>
           )}
+
+          {/* Fallback for users whose org hasn't verified their email domain:
+              let them name the org explicitly. Hidden by default to keep the
+              common path (email-driven discovery) clean. */}
+          {!redirecting &&
+            (showOrgInput ? (
+              <div className="pt-1">
+                <label htmlFor="login-org" className="sr-only">
+                  Organization slug
+                </label>
+                <Input
+                  size="md"
+                  id="login-org"
+                  placeholder="Organization slug (e.g. acme)"
+                  value={org}
+                  onChange={(e) => setOrg(e.target.value)}
+                  autoComplete="organization"
+                  autoFocus
+                />
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowOrgInput(true)}
+              >
+                Sign in with a different organization
+              </Button>
+            ))}
         </div>
 
         <div className="mt-6 text-sm text-fg-muted text-center space-y-1">

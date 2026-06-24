@@ -34,6 +34,8 @@ export function DomainsSection({
   const [domains, setDomains] = useState<OrgDomain[]>([]);
   const [draft, setDraft] = useState("");
   const [unavailable, setUnavailable] = useState(false);
+  const [verifying, setVerifying] = useState<Record<string, boolean>>({});
+  const [verifyMsg, setVerifyMsg] = useState<Record<string, string>>({});
   const { busy, run } = useAsyncAction();
 
   const reload = async () => {
@@ -69,17 +71,39 @@ export function DomainsSection({
     });
   };
 
+  // verify polls the backend a few times before giving up: DNS propagation is
+  // often slower than a single click, so one immediate check then a handful of
+  // spaced retries spares the admin from manually re-clicking Verify.
   const verify = async (d: OrgDomain) => {
+    const attempts = 5;
+    const delayMs = 3000;
+    setVerifying((v) => ({ ...v, [d.id]: true }));
+    setVerifyMsg((m) => ({ ...m, [d.id]: "Checking DNS…" }));
     try {
-      const r = await verifyOrgDomain(teamID, d.id);
-      if (!r.verified) {
-        onError(
-          `Could not verify ${d.domain} — is the TXT record published? (DNS can take a few minutes.)`,
-        );
+      for (let i = 0; i < attempts; i++) {
+        const r = await verifyOrgDomain(teamID, d.id);
+        if (r.verified) {
+          setVerifyMsg((m) => ({ ...m, [d.id]: "" }));
+          await reload();
+          return;
+        }
+        if (i < attempts - 1) {
+          setVerifyMsg((m) => ({
+            ...m,
+            [d.id]: `Not visible yet — retrying (${i + 1}/${attempts - 1})…`,
+          }));
+          await new Promise((res) => setTimeout(res, delayMs));
+        }
       }
-      await reload();
+      setVerifyMsg((m) => ({
+        ...m,
+        [d.id]: `Still can't see the TXT record at ${d.challenge_host}. Confirm it's published at your DNS provider (as a TXT record, value exactly as shown) — propagation can take several minutes — then try again.`,
+      }));
     } catch (e) {
+      setVerifyMsg((m) => ({ ...m, [d.id]: "" }));
       onError(errorMessage(e));
+    } finally {
+      setVerifying((v) => ({ ...v, [d.id]: false }));
     }
   };
 
@@ -140,11 +164,19 @@ export function DomainsSection({
                   </div>
                 </div>
               )}
+              {verifyMsg[d.id] && (
+                <div className="text-xs text-fg-muted">{verifyMsg[d.id]}</div>
+              )}
               {canManage && (
                 <div className="flex gap-2">
                   {!d.verified_at && (
-                    <Button variant="secondary" size="sm" onClick={() => void verify(d)}>
-                      Verify
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={!!verifying[d.id]}
+                      onClick={() => void verify(d)}
+                    >
+                      {verifying[d.id] ? "Checking…" : "Verify"}
                     </Button>
                   )}
                   <Button variant="danger" size="sm" onClick={() => void remove(d)}>
