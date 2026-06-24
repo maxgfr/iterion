@@ -148,11 +148,15 @@ func (s *Server) handleGitHubIssueLabeled(w http.ResponseWriter, r *http.Request
 	// launches, while re-applying the SAME label is a no-op replay.
 	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("gh|issue|%s|%s|%s|%d|%s", cfg.TenantID, cfg.ID, p.ProjectPath, p.IssueNumber, p.LabelName)))
 
-	vars := issueLabeledVars(p, cfg.LaunchVars)
-
-	// repoRef empty → the runner clones the repo's default branch; featurly's
-	// worktree: auto branches from there.
-	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, "", payloadHash, srcIP)
+	// Route through dispatchInvocation so a one-way tracking card is
+	// materialised on the tenant's board (idempotent, linked to the issue via
+	// source_issue_ref) — exactly like the slash-command path — while the run
+	// still launches (or a board coordinator owns it). repoRef empty → the
+	// runner clones the repo's default branch; featurly's worktree: auto
+	// branches from there.
+	route := s.boardRouteForLabel(botID)
+	vars := issueLabeledVars(p, cfg.LaunchVars, route.ArgsVar)
+	s.dispatchInvocation(ctx, w, r, cfg, meta, idemKey, route, vars, p.CloneURL, "", payloadHash, srcIP)
 }
 
 // issueLabeledVars composes the launch vars an implementer bot (featurly)
@@ -160,9 +164,12 @@ func (s *Server) handleGitHubIssueLabeled(w http.ResponseWriter, r *http.Request
 // title+body as the feature prompt, open_mr to push+open the PR, and
 // source_issue_ref (the issue URL) so finalize_mr comments the PR URL back
 // onto the issue. Operator-pinned LaunchVars win last.
-func issueLabeledVars(p prforge.ParsedIssue, launchVars map[string]string) map[string]string {
+func issueLabeledVars(p prforge.ParsedIssue, launchVars map[string]string, argsVar string) map[string]string {
+	if argsVar == "" {
+		argsVar = "feature_prompt"
+	}
 	vars := map[string]string{
-		"feature_prompt":   strings.TrimSpace(p.IssueTitle + "\n\n" + p.IssueBody),
+		argsVar:            strings.TrimSpace(p.IssueTitle + "\n\n" + p.IssueBody),
 		"open_mr":          "true",
 		"source_issue_ref": p.IssueURL,
 	}

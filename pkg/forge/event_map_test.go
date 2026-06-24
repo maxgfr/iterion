@@ -18,10 +18,11 @@ func TestToNativeEvents(t *testing.T) {
 		{ProviderGitHub, all, []string{"issue_comment", "pull_request"}},
 		{ProviderForgejo, all, []string{"issue_comment", "pull_request"}},
 		{ProviderGitLab, []string{bundle.ForgeEventPullRequest}, []string{"merge_request"}},
-		// issue_labeled → github/forgejo "issues"; gitlab has no mapping (skipped).
+		// issue_labeled → "issues" native event on every provider (gitlab's
+		// admin client maps it to the issues_events boolean hook field).
 		{ProviderGitHub, []string{bundle.ForgeEventIssueLabeled}, []string{"issues"}},
 		{ProviderForgejo, []string{bundle.ForgeEventIssueLabeled}, []string{"issues"}},
-		{ProviderGitLab, []string{bundle.ForgeEventIssueLabeled}, nil},
+		{ProviderGitLab, []string{bundle.ForgeEventIssueLabeled}, []string{"issues"}},
 		{ProviderGitHub, []string{bundle.ForgeEventPullRequest, bundle.ForgeEventIssueLabeled}, []string{"issues", "pull_request"}},
 		{ProviderGitLab, []string{"bogus"}, nil},
 		{ProviderGitLab, []string{bundle.ForgeEventPullRequest, bundle.ForgeEventPullRequest}, []string{"merge_request"}}, // dedup

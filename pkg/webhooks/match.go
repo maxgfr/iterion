@@ -95,6 +95,19 @@ func MatchLabel(allowlist []string, label string) bool {
 	return false
 }
 
+// FirstMatchingLabel returns the first freshly-applied label that passes the
+// allowlist — the trigger — or "" when none qualifies. With an empty allowlist
+// any added label qualifies (the first is returned). Used by the GitLab issues
+// path, where one event can add several labels at once (changes.labels diff).
+func FirstMatchingLabel(allowlist, added []string) string {
+	for _, l := range added {
+		if MatchLabel(allowlist, strings.TrimSpace(l)) {
+			return l
+		}
+	}
+	return ""
+}
+
 func matchProjectPattern(pat, path string) bool {
 	pat = strings.TrimSpace(pat)
 	if pat == "" {

@@ -14,6 +14,7 @@ type gitlabHook struct {
 	URL                 string `json:"url"`
 	MergeRequestsEvents bool   `json:"merge_requests_events"`
 	NoteEvents          bool   `json:"note_events"`
+	IssuesEvents        bool   `json:"issues_events"`
 	PushEvents          bool   `json:"push_events"`
 }
 
@@ -26,6 +27,9 @@ func (h gitlabHook) toHandle() forge.HookHandle {
 	}
 	if h.NoteEvents {
 		events = append(events, "note")
+	}
+	if h.IssuesEvents {
+		events = append(events, "issues")
 	}
 	return forge.HookHandle{
 		ID:     strconv.FormatInt(h.ID, 10),
@@ -46,6 +50,7 @@ func hookBody(spec forge.HookSpec) map[string]any {
 		"push_events":             false,
 		"merge_requests_events":   hasEvent(spec.Events, "merge_request"),
 		"note_events":             hasEvent(spec.Events, "note"),
+		"issues_events":           hasEvent(spec.Events, "issues"),
 	}
 	if spec.Secret != "" {
 		b["token"] = spec.Secret

@@ -57,9 +57,14 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 		// Conversational layer: a /revi command (or, later, a reply to
 		// the bot's thread). See docs/forge-conversations.md.
 		s.handleGitLabNote(ctx, w, r, cfg, body, payloadHash, srcIP)
+	case gitlab.EventHeaderIssue:
+		// Issue lifecycle: adding a trigger label (e.g. "implement") launches
+		// an implementer bot that opens an MR back-linked to the issue, and
+		// materialises a one-way tracking card on the board.
+		s.handleGitLabIssueEvent(ctx, w, r, cfg, body, payloadHash, srcIP)
 	default:
 		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{}, webhooks.StatusInvalid, payloadHash, srcIP, "unsupported X-Gitlab-Event")
-		httpError(w, http.StatusBadRequest, "unsupported event (merge_request or note only)")
+		httpError(w, http.StatusBadRequest, "unsupported event (merge_request, note or issue only)")
 	}
 }
 
@@ -101,6 +106,79 @@ func (s *Server) handleGitLabMergeRequestEvent(ctx context.Context, w http.Respo
 	vars := reviewPRVars(p.MRURL, p.TargetBranch, strings.TrimSpace(p.Title+"\n\n"+p.Description), cfg.LaunchVars, map[string]string{"pr_author": p.SenderUsername})
 
 	s.insertAndLaunchWebhook(ctx, w, r, cfg, meta, idemKey, botID, vars, p.CloneURL, p.SourceBranch, payloadHash, srcIP)
+}
+
+// handleGitLabIssueEvent handles a verified GitLab "Issue Hook". GitLab has no
+// dedicated "labeled" action, so the parser diffs changes.labels; a launch
+// fires only when a freshly-added label passes the webhook's LabelAllowlist on
+// an OPEN issue (allowed event + project). It routes through dispatchInvocation
+// (same as the slash-command path) so a one-way tracking card is materialised
+// and the run launches with the issue as the feature task. A filtered delivery
+// returns 200 so GitLab doesn't auto-disable the hook on routine issue edits.
+func (s *Server) handleGitLabIssueEvent(ctx context.Context, w http.ResponseWriter, r *http.Request, cfg webhooks.Config, body []byte, payloadHash, srcIP string) {
+	p, err := gitlab.ParseIssue(body)
+	if err != nil {
+		s.recordTerminalWebhookDelivery(ctx, cfg, webhookEventMeta{Kind: "issues"}, webhooks.StatusInvalid, payloadHash, srcIP, err.Error())
+		httpError(w, http.StatusBadRequest, "invalid issue payload")
+		return
+	}
+	meta := gitlabIssueMeta(p)
+	label := webhooks.FirstMatchingLabel(cfg.LabelAllowlist, p.AddedLabels)
+	if p.State != "opened" || label == "" ||
+		!webhooks.MatchEvent(cfg.EventAllowlist, "issues", "issues") ||
+		!webhooks.MatchProject(cfg.ProjectAllowlist, p.ProjectPath) {
+		s.recordTerminalWebhookDelivery(ctx, cfg, meta, webhooks.StatusFiltered, payloadHash, srcIP, "")
+		writeJSONStatus(w, http.StatusOK, map[string]string{"status": webhooks.StatusFiltered})
+		return
+	}
+
+	botID, ok := s.resolveReviewBot(ctx, w, cfg, meta, payloadHash, srcIP)
+	if !ok {
+		return
+	}
+
+	// Idempotency: one launch per (tenant, webhook, project, issue, label).
+	// "gl|issue|" keeps the key space disjoint from the mr|/note|/cmd| paths.
+	idemKey := knowledge.ChecksumHex([]byte(fmt.Sprintf("gl|issue|%s|%s|%d|%d|%s", cfg.TenantID, cfg.ID, p.ProjectID, p.IssueIID, label)))
+
+	route := s.boardRouteForLabel(botID)
+	vars := gitlabIssueLabeledVars(p, cfg.LaunchVars, route.ArgsVar)
+	// An issue carries no MR source branch — the bot opens its MR from the
+	// project default branch (finalize_mr cuts the branch from there).
+	s.dispatchInvocation(ctx, w, r, cfg, meta, idemKey, route, vars, p.CloneURL, p.DefaultBranch, payloadHash, srcIP)
+}
+
+// gitlabIssueLabeledVars composes the implementer-bot launch vars for a
+// labeled GitLab issue: the issue title+body as the feature prompt (under the
+// bot's args var), open_mr, and source_issue_ref (the issue URL) for the
+// back-link. Operator-pinned LaunchVars win last.
+func gitlabIssueLabeledVars(p gitlab.ParsedIssue, launchVars map[string]string, argsVar string) map[string]string {
+	if argsVar == "" {
+		argsVar = "feature_prompt"
+	}
+	vars := map[string]string{
+		argsVar:            strings.TrimSpace(p.Title + "\n\n" + p.Description),
+		"open_mr":          "true",
+		"source_issue_ref": p.URL,
+	}
+	for k, v := range launchVars {
+		vars[k] = v
+	}
+	return vars
+}
+
+// gitlabIssueMeta flattens a parsed GitLab issue into webhookEventMeta.
+// SubjectURL carries the issue URL — the back-link target ensureBoardCard
+// stamps into source_issue_ref.
+func gitlabIssueMeta(p gitlab.ParsedIssue) webhookEventMeta {
+	return webhookEventMeta{
+		Kind:         "issues",
+		Action:       "labeled",
+		ProjectPath:  p.ProjectPath,
+		SubjectID:    p.SubjectID(),
+		SubjectURL:   p.URL,
+		SenderHandle: p.AuthorUsername,
+	}
 }
 
 // handleGitLabNote handles an inbound GitLab note (comment / reply) — the

@@ -64,6 +64,43 @@ func commandRouteFromInvocation(botID string, inv bundle.Invocation) webhooks.Co
 // server (nil-safe — commandDiscovery handles registry errors internally).
 func (s *Server) cmdDiscovery() webhooks.CommandDiscovery { return commandDiscovery{s: s} }
 
+// boardRouteForLabel builds a synthetic board-mode CommandRoute for a
+// label-triggered launch (an issue gains a trigger label → run the bot).
+// It carries no slash-command — only the pieces ensureBoardCard/dispatchInvocation
+// consume: the resolved bot, board mode, and the bot's issue args var + opens-MR
+// behaviour. Those are taken from the bot's `command` invocation when present
+// (so a labeled issue dispatches the bot exactly like its `/command` would),
+// defaulting to the implementer contract (feature_prompt + opens an MR) — the
+// shape every label-triggered bot (featurly et al.) follows.
+func (s *Server) boardRouteForLabel(botID string) webhooks.CommandRoute {
+	route := webhooks.CommandRoute{
+		BotID:   botID,
+		Mode:    string(bundle.ExecutionBoard),
+		ArgsVar: "feature_prompt",
+		OpensMR: true,
+	}
+	entries, err := botregistry.List(botregistry.ListOptions{Paths: s.effectivePaths()})
+	if err != nil {
+		return route
+	}
+	for _, e := range entries {
+		if e.Name != botID {
+			continue
+		}
+		for _, inv := range e.Invocations {
+			if inv.Kind != bundle.InvocationKindCommand || inv.Command == nil {
+				continue
+			}
+			if inv.ArgsVar != "" {
+				route.ArgsVar = inv.ArgsVar
+			}
+			route.OpensMR = inv.Command.OpensMR
+			return route
+		}
+	}
+	return route
+}
+
 // dispatchInvocation is the shared sink a comment handler calls once it has a
 // resolved command route + composed vars. It launches by execution mode:
 //

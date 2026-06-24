@@ -26,11 +26,11 @@ var normalizedToNative = map[string]map[Provider]string{
 		ProviderGitHub:  "issue_comment",
 		ProviderForgejo: "issue_comment",
 	},
-	// issue_labeled → the forge-native "issues" event (github/forgejo).
-	// GitLab's issue hook ("issues_events") is intentionally omitted: the
-	// inbound GitLab handler doesn't yet parse the issues payload, so we
-	// don't subscribe a hook to events we'd drop.
+	// issue_labeled → the forge-native "issues" event. GitLab models it as a
+	// boolean hook field (issues_events); the gitlab admin client translates
+	// this native "issues" name to that field.
 	bundle.ForgeEventIssueLabeled: {
+		ProviderGitLab:  "issues",
 		ProviderGitHub:  "issues",
 		ProviderForgejo: "issues",
 	},

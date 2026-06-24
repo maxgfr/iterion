@@ -94,6 +94,11 @@ Single URL, two event kinds dispatched on `X-Gitlab-Event`
   `/revi`. Quoting "please run /revi" mid-text does not trigger
   (anti-oscillation guard;
   [pkg/webhooks/gitlab/note.go:IsReviewCommand](../pkg/webhooks/gitlab/note.go)).
+- **`Issue Hook`** — adding a trigger label (e.g. `implement`) launches the
+  webhook's bot, same as GitHub `issues` (below). GitLab has no `labeled`
+  action, so the parser diffs `changes.labels` (previous→current) and fires
+  only on a *freshly-added* label that passes `label_allowlist`, on an OPEN
+  issue ([pkg/webhooks/gitlab/issue.go](../pkg/webhooks/gitlab/issue.go)).
 
 Default event allowlist: `{merge_request, note}` — both kinds reach a
 zero-config webhook
@@ -122,6 +127,16 @@ failures; [pkg/server/webhooks_github.go](../pkg/server/webhooks_github.go)):
   implements the issue, opens a PR, and comments the PR URL back onto the
   issue. Scope which label fires with **`label_allowlist`** (below);
   re-applying the same label is an idempotent replay.
+
+The label path (GitHub `issues` and GitLab `Issue Hook`) routes through
+the same dispatcher sink as the `/command` path, so when a tenant cloud
+board is wired it also **materialises a one-way tracking card** for the
+issue — a read-only mirror linked back to the source issue via
+`source_issue_ref` (idempotent per issue). GitHub/GitLab stay the source
+of truth; iterion only writes back to them (PR + back-link comment). With
+a board *coordinator* running, the card is the unit of work the dispatcher
+executes; without one, the card is a tracking record and the run launches
+directly ([pkg/server/invocation_dispatch.go:dispatchInvocation](../pkg/server/invocation_dispatch.go)).
 
 ### Forgejo / Gitea (`POST /api/webhooks/forgejo/{id}`)
 
