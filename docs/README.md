@@ -16,7 +16,7 @@ Welcome to the Iterion docs. Pages are organised by audience and topic.
 
 | Page | Read this if… |
 |---|---|
-| [install.md](install.md) | …you want to install Iterion. Covers all seven delivery modes (CLI, web editor, desktop, Docker, cloud, dispatcher, SDK). |
+| [install.md](install.md) | …you want to install Iterion. Covers all eight delivery modes (CLI, studio, desktop, Docker, cloud, dispatcher, scheduler, SDK). |
 | [visual-editor.md](visual-editor.md) | …you want a browser-based drag-and-drop workflow editor. |
 | [desktop.md](desktop.md) | …you want the native window app with multi-project + OS keychain + auto-update. |
 | [examples.md](examples.md) | …you want to learn from working `.bot` files. |

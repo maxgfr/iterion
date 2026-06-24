@@ -23,13 +23,17 @@ Stop coding like a mortal. Define your bots as readable `.bot` files — chain a
 - [What is Iterion?](#what-is-iterion)
 - [Features](#features)
 - [Meet the legion](#meet-the-legion)
-- [Quick Start](#quick-start)
+- [Getting Started](#getting-started)
+  - [Installation](#installation)
+  - [Your first workflow](#your-first-workflow)
 - [Workflow files](#workflow-files)
 - [A Taste of the DSL](#a-taste-of-the-dsl)
 - [Documentation](#documentation)
 - [License](#license)
 
 ---
+
+<a id="what-is-iterion"></a>
 
 ## 🧩 What is Iterion?
 
@@ -56,6 +60,8 @@ Think of it as a DAG runner purpose-built for LLM workflows — with first-class
 </p>
 
 ---
+
+<a id="features"></a>
 
 ## 📋 Features
 
@@ -136,6 +142,8 @@ real multi-tenant service. Start at [docs/baas-overview.md](docs/baas-overview.m
 
 ---
 
+<a id="meet-the-legion"></a>
+
 ## ⚔️ Meet the legion
 
 Iterion ships a team of named, first-class bots — your legion. Each is a general-purpose `.bot` you point at *any* repo: run it directly (`iterion run bots/<name>/main.bot`), dispatch it per issue, or schedule it.
@@ -156,11 +164,15 @@ List them anytime with `iterion bots list`; see [docs/examples.md](docs/examples
 
 ---
 
-## 🚀 Quick Start
+<a id="getting-started"></a>
 
-### Pick your install
+## 🚀 Getting Started
 
-Same engine, seven delivery modes — pick the one that fits your workflow:
+<a id="installation"></a>
+
+### Installation
+
+Same engine, eight delivery modes — pick the one that fits your workflow:
 
 | Mode | Best for | Install | Docs |
 |---|---|---|---|
@@ -212,6 +224,8 @@ All run data (events, artifacts, interactions) is stored in `.iterion/runs/`.
 
 ---
 
+<a id="workflow-files"></a>
+
 ## 🤖 Workflow files
 
 Iterion accepts plain workflow sources as **`.bot`** files. The former `.iter` extension is no longer supported at the CLI, server, dispatcher, or studio boundaries.
@@ -219,6 +233,8 @@ Iterion accepts plain workflow sources as **`.bot`** files. The former `.iter` e
 Bots can also be shipped as **`.botz`** — a tar.gz packaging the workflow with adjacent resources (Claude Code skills, reusable prompts, default attachments, manifest). Scaffold with `iterion bundle init`, build with `iterion bundle pack`, run with `iterion run my.botz`. See [docs/bundles.md](docs/bundles.md).
 
 ---
+
+<a id="a-taste-of-the-dsl"></a>
 
 ## ✨ A Taste of the DSL
 
@@ -258,6 +274,8 @@ That's it — 28 lines. The agent gets a code input, produces a structured `{app
 From here you can add judges for multi-pass review, routers for parallel fan-out, human gates for approval, bounded loops for retry, budget caps for cost control, and more — see [docs/dsl.md](docs/dsl.md) for the full reference.
 
 ---
+
+<a id="documentation"></a>
 
 ## 📚 Documentation
 
@@ -301,6 +319,8 @@ The full documentation lives under [`docs/`](docs/) — start with the [document
 - [docs/grammar/iterion_v1.ebnf](docs/grammar/iterion_v1.ebnf) — formal EBNF grammar
 
 ---
+
+<a id="license"></a>
 
 ## 📄 License
 
