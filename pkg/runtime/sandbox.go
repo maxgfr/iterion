@@ -278,6 +278,18 @@ func resolveAndStartSandbox(ctx context.Context, p SandboxParams) (*activeSandbo
 	}
 	caps := driver.Capabilities()
 
+	// User-declared host bind mounts (a bot's `sandbox.mounts:` with type=bind —
+	// e.g. a ~/.claude OAuth mount authored for the docker driver) cannot be
+	// honoured by a driver with no host filesystem (kubernetes: translateMounts
+	// rejects type=bind). Rather than hard-fail a bot written for docker, drop
+	// those entries with a warning; the sandboxed agent falls back to env-provided
+	// creds/config (in cloud the runner's LLM secret reaches the delegate, which
+	// forwards it into the sandbox exec). Docker keeps them (SupportsHostBindMounts
+	// is true there). Non-bind mounts (pvc/configmap/secret) always pass through.
+	if !caps.SupportsHostBindMounts {
+		spec.Mounts = dropHostBindMounts(spec.Mounts, logger)
+	}
+
 	// Configure all mounts BEFORE the driver prepares resources. Each
 	// helper is a silent no-op when its host source is missing, so
 	// callers don't have to guard.

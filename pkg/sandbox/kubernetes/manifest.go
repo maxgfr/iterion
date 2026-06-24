@@ -76,6 +76,18 @@ const (
 // renders JSON internally (the kubectl decoder accepts both); JSON
 // is the safer encoding because it sidesteps every YAML parsing
 // edge case (anchor merges, string vs date, multiline).
+// pullPolicyForImage chooses the pod's imagePullPolicy from the image ref. A
+// pinned digest (…@sha256:…) is immutable, so IfNotPresent avoids a needless
+// re-pull. Any mutable tag (:edge, :latest, a plain :tag, or no tag) → Always,
+// so a freshly rebuilt image (e.g. iterion-sandbox-full:edge after a CI bake) is
+// picked up instead of a stale node-cached layer.
+func pullPolicyForImage(image string) string {
+	if strings.Contains(image, "@sha256:") {
+		return "IfNotPresent"
+	}
+	return "Always"
+}
+
 func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 	if in.Namespace == "" {
 		return nil, fmt.Errorf("kubernetes: namespace is required")
@@ -187,6 +199,7 @@ func BuildPodManifest(in PodManifestInput) ([]byte, error) {
 				map[string]any{
 					"name":            "workload",
 					"image":           in.Spec.Image,
+					"imagePullPolicy": pullPolicyForImage(in.Spec.Image),
 					"command":         []any{"sleep", "infinity"},
 					"workingDir":      workspace,
 					"env":             envSlice,

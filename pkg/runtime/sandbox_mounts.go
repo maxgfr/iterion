@@ -375,6 +375,55 @@ func addRtkBinaryMount(spec *sandbox.Spec) {
 	)
 }
 
+// dropHostBindMounts removes type=bind entries from a sandbox spec's mount list,
+// returning the kept (non-bind) mounts. resolveAndStartSandbox calls it when the
+// selected driver has no host filesystem (Capabilities.SupportsHostBindMounts is
+// false — i.e. kubernetes). A bot's docker-authored bind mount (e.g. a ~/.claude
+// OAuth mount in its sandbox block) is meaningless there and would otherwise
+// hard-fail manifest building (the kubernetes driver rejects type=bind), so we
+// warn and drop it; the sandboxed agent gets its creds/config from env instead.
+// Non-bind mounts (pvc/configmap/secret) pass through untouched.
+func dropHostBindMounts(mounts []string, logger *iterlog.Logger) []string {
+	if len(mounts) == 0 {
+		return mounts
+	}
+	kept := make([]string, 0, len(mounts))
+	for _, m := range mounts {
+		if mountIsHostBind(m) {
+			if logger != nil {
+				logger.Warn("runtime: sandbox: dropping host bind mount %q — this driver has no host filesystem (type=bind unsupported); the sandboxed agent must get its creds/config from env or a pvc/configmap/secret mount", m)
+			}
+			continue
+		}
+		kept = append(kept, m)
+	}
+	return kept
+}
+
+// mountIsHostBind reports whether a docker-style mount string is a host bind
+// mount: an explicit type=bind, or — docker's default — a source= with no
+// explicit type. pvc/configmap/secret types are never host binds.
+func mountIsHostBind(mount string) bool {
+	var typ string
+	hasSource := false
+	for _, part := range strings.Split(mount, ",") {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		switch strings.TrimSpace(kv[0]) {
+		case "type":
+			typ = strings.TrimSpace(kv[1])
+		case "source", "src":
+			hasSource = true
+		}
+	}
+	if typ != "" {
+		return typ == "bind"
+	}
+	return hasSource
+}
+
 // addWorktreeGitMount bind-mounts the source repo's `.git` directory
 // into the container at the SAME host path when a worktree is active,
 // so the worktree's `.git` pointer file — a one-line
