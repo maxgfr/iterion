@@ -196,10 +196,15 @@ func (s *Server) handleMarketplaceInstall(w http.ResponseWriter, r *http.Request
 		s.httpErrorFor(w, r, http.StatusNotFound, "marketplace: %q not found", slug)
 		return
 	}
+	// `?force=true` overwrites an existing install — the studio "Update"
+	// path sends it so re-installing a drifted version succeeds instead
+	// of erroring "already exists".
+	force := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("force")), "true")
 	res, err := botinstall.Install(r.Context(), botinstall.Options{
 		Source:  entry.RepoURL,
 		Ref:     entry.Ref,
 		Path:    entry.Subpath,
+		Force:   force,
 		Workdir: s.cfg.WorkDir,
 	})
 	if err != nil {
@@ -218,6 +223,52 @@ func (s *Server) handleMarketplaceInstall(w http.ResponseWriter, r *http.Request
 		refreshed = entry
 	}
 	s.writeJSONFor(w, r, marketplaceInstallResponse{Install: res, Entry: refreshed})
+}
+
+// handleMarketplaceUninstall answers
+// DELETE /api/v1/marketplace/bots/{slug}/install. Resolves the registry
+// entry to recover the install name, removes the workspace bundle, and
+// returns the (unchanged) entry so the studio can flip the card back to
+// "Install". Local-mode only — workspace-mutating, same as install.
+func (s *Server) handleMarketplaceUninstall(w http.ResponseWriter, r *http.Request) {
+	if !s.requireMarketplace(w, r) {
+		return
+	}
+	if !s.requireSafeOrigin(w, r) {
+		return
+	}
+	if s.cfg.Mode == "cloud" {
+		s.httpErrorFor(w, r, http.StatusForbidden, "marketplace: uninstall is not available in cloud mode")
+		return
+	}
+	if s.cfg.WorkDir == "" {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "marketplace: no workspace configured to uninstall from")
+		return
+	}
+	slug := strings.TrimSpace(r.PathValue("slug"))
+	if slug == "" {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "marketplace: slug required")
+		return
+	}
+	entry, ok, err := s.marketplace.Get(r.Context(), slug)
+	if err != nil {
+		s.httpErrorFor(w, r, http.StatusInternalServerError, "marketplace: get: %v", err)
+		return
+	}
+	if !ok {
+		s.httpErrorFor(w, r, http.StatusNotFound, "marketplace: %q not found", slug)
+		return
+	}
+	// The bundle installs under its manifest name (entry.Name), not the
+	// registry slug — Remove deletes <workdir>/.botz/<name>.
+	if err := botinstall.Remove(r.Context(), botinstall.Options{
+		Name:    entry.Name,
+		Workdir: s.cfg.WorkDir,
+	}); err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "marketplace: uninstall: %v", err)
+		return
+	}
+	s.writeJSONFor(w, r, entry)
 }
 
 // normalizeTags strips empty/whitespace entries and de-dups so the

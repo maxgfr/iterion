@@ -49,6 +49,18 @@ func EnsureSchema(ctx context.Context, db *mongo.Database) error {
 			{Key: "author", Value: "text"},
 			{Key: "tags", Value: "text"},
 		}, Options: options.Index().SetName("text_search")},
+		// Browse visibility: scope + status + popularity sort.
+		{Keys: bson.D{{Key: "scope", Value: 1}, {Key: "status", Value: 1}, {Key: "installs", Value: -1}},
+			Options: options.Index().SetName("scope_status")},
+		// Org-scoped browse + org moderation queue.
+		{Keys: bson.D{{Key: "org_id", Value: 1}, {Key: "status", Value: 1}},
+			Options: options.Index().SetName("org_status")},
+		// Moderation queue (oldest pending first).
+		{Keys: bson.D{{Key: "status", Value: 1}, {Key: "created_at", Value: 1}},
+			Options: options.Index().SetName("moderation_queue")},
+		// "My submissions" lookup.
+		{Keys: bson.D{{Key: "submitted_by", Value: 1}},
+			Options: options.Index().SetName("submitter")},
 	}); err != nil && !mongoutil.IsIndexConflict(err) {
 		return fmt.Errorf("marketplace: ensure indexes: %w", err)
 	}
@@ -56,21 +68,30 @@ func EnsureSchema(ctx context.Context, db *mongo.Database) error {
 }
 
 // List returns every entry matching q, sorted by Installs desc, then
-// Slug asc — same shape as JSONStore.List.
+// Slug asc — same shape as JSONStore.List. The viewer's scope/status
+// reach (q.Viewer) is composed into the filter so the database, not the
+// handler, enforces visibility.
 func (s *MongoStore) List(ctx context.Context, q Query) ([]Entry, error) {
-	filter := bson.M{}
+	and := bson.A{}
 	if t := q.Tag; t != "" {
-		filter["tags"] = t
+		and = append(and, bson.M{"tags": t})
 	}
 	if text := q.Text; text != "" {
 		// $text uses the text index above; falls back to a regex
 		// scan over slug+name when callers query a substring the
 		// stemmed text index would miss.
-		filter["$or"] = bson.A{
+		and = append(and, bson.M{"$or": bson.A{
 			bson.M{"$text": bson.M{"$search": text}},
 			bson.M{"_id": bson.M{"$regex": text, "$options": "i"}},
 			bson.M{"name": bson.M{"$regex": text, "$options": "i"}},
-		}
+		}})
+	}
+	if vf := viewerFilter(q.Viewer); vf != nil {
+		and = append(and, vf)
+	}
+	filter := bson.M{}
+	if len(and) > 0 {
+		filter["$and"] = and
 	}
 	cur, err := s.col.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "installs", Value: -1}, {Key: "_id", Value: 1}}))
 	if err != nil {
@@ -106,18 +127,27 @@ func (s *MongoStore) Upsert(ctx context.Context, e Entry) error {
 		return errors.New("marketplace: slug required")
 	}
 	set := bson.M{
-		"name":         e.Name,
-		"display_name": e.DisplayName,
-		"description":  e.Description,
-		"author":       e.Author,
-		"tags":         e.Tags,
-		"repo_url":     e.RepoURL,
-		"ref":          e.Ref,
-		"subpath":      e.Subpath,
-		"version":      e.Version,
-		"readme":       e.README,
-		"presets":      e.Presets,
-		"updated_at":   e.UpdatedAt,
+		"name":          e.Name,
+		"display_name":  e.DisplayName,
+		"description":   e.Description,
+		"author":        e.Author,
+		"tags":          e.Tags,
+		"repo_url":      e.RepoURL,
+		"ref":           e.Ref,
+		"subpath":       e.Subpath,
+		"version":       e.Version,
+		"readme":        e.README,
+		"presets":       e.Presets,
+		"updated_at":    e.UpdatedAt,
+		"scope":         string(e.Scope),
+		"org_id":        e.OrgID,
+		"status":        string(e.Status),
+		"source":        string(e.Source),
+		"bundle_ref":    e.BundleRef,
+		"submitted_by":  e.SubmittedBy,
+		"reviewed_by":   e.ReviewedBy,
+		"reviewed_at":   e.ReviewedAt,
+		"reject_reason": e.RejectReason,
 	}
 	setOnInsert := bson.M{
 		"installs":   0,
@@ -152,4 +182,135 @@ func (s *MongoStore) IncrementInstalls(ctx context.Context, slug string) error {
 		return fmt.Errorf("marketplace: entry %q not found", slug)
 	}
 	return nil
+}
+
+// SetStatus transitions slug's moderation status. expect, when set, is a
+// CAS guard composed into the match so concurrent moderators can't both
+// win; a guard miss returns ErrStatusConflict. Review metadata is
+// stamped in the same update.
+func (s *MongoStore) SetStatus(ctx context.Context, slug string, expect, next Status, review Review) error {
+	match := bson.M{"_id": slug}
+	if expect != "" {
+		// Match the expected status, treating empty/absent as approved
+		// (EffectiveStatus parity) so legacy entries CAS correctly.
+		if expect == StatusApproved {
+			match["$or"] = bson.A{
+				bson.M{"status": string(StatusApproved)},
+				bson.M{"status": bson.M{"$in": bson.A{"", nil}}},
+				bson.M{"status": bson.M{"$exists": false}},
+			}
+		} else {
+			match["status"] = string(expect)
+		}
+	}
+	set := bson.M{
+		"status":      string(next),
+		"reviewed_by": review.By,
+		"reviewed_at": review.At,
+	}
+	if next == StatusRejected {
+		set["reject_reason"] = review.Reason
+	} else {
+		set["reject_reason"] = ""
+	}
+	res, err := s.col.UpdateOne(ctx, match, bson.M{"$set": set})
+	if err != nil {
+		return fmt.Errorf("marketplace: set status: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		// Distinguish "no such slug" from "CAS guard missed".
+		if _, ok, gerr := s.Get(ctx, slug); gerr == nil && ok {
+			return ErrStatusConflict
+		}
+		return fmt.Errorf("marketplace: entry %q not found", slug)
+	}
+	return nil
+}
+
+// ListForModeration returns entries in the requested moderation states
+// (default {StatusPending}), scoped to q.OrgIDs unless q.All is set,
+// sorted oldest-first.
+func (s *MongoStore) ListForModeration(ctx context.Context, q ModerationQuery) ([]Entry, error) {
+	statuses := q.Statuses
+	if len(statuses) == 0 {
+		statuses = []Status{StatusPending}
+	}
+	statusVals := make(bson.A, 0, len(statuses)+2)
+	for _, st := range statuses {
+		statusVals = append(statusVals, string(st))
+		if st == StatusApproved {
+			// legacy/absent status counts as approved
+			statusVals = append(statusVals, "", nil)
+		}
+	}
+	and := bson.A{bson.M{"status": bson.M{"$in": statusVals}}}
+	if !q.All {
+		and = append(and, bson.M{"org_id": bson.M{"$in": toAny(q.OrgIDs)}})
+	}
+	cur, err := s.col.Find(ctx, bson.M{"$and": and},
+		options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}, {Key: "_id", Value: 1}}))
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: moderation find: %w", err)
+	}
+	defer cur.Close(ctx)
+	var out []Entry
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("marketplace: moderation decode: %w", err)
+	}
+	return out, nil
+}
+
+// Delete removes slug. A missing slug is not an error.
+func (s *MongoStore) Delete(ctx context.Context, slug string) error {
+	if _, err := s.col.DeleteOne(ctx, bson.M{"_id": slug}); err != nil {
+		return fmt.Errorf("marketplace: delete: %w", err)
+	}
+	return nil
+}
+
+// viewerFilter builds the bson visibility constraint mirroring
+// types.Visible. Returns nil when v.Enforce is false (local mode → no
+// filtering).
+func viewerFilter(v ViewerContext) bson.M {
+	if !v.Enforce {
+		return nil
+	}
+	approved := bson.M{"$or": bson.A{
+		bson.M{"status": string(StatusApproved)},
+		bson.M{"status": bson.M{"$in": bson.A{"", nil}}},
+		bson.M{"status": bson.M{"$exists": false}},
+	}}
+	visible := bson.A{}
+	if v.IsSuperAdmin {
+		visible = append(visible, approved)
+	} else {
+		scopeOpts := bson.A{
+			bson.M{"scope": string(ScopePublic)},
+			bson.M{"scope": bson.M{"$in": bson.A{"", nil}}},
+			bson.M{"scope": bson.M{"$exists": false}},
+		}
+		if v.Authenticated {
+			scopeOpts = append(scopeOpts, bson.M{"scope": string(ScopeInstance)})
+		}
+		if len(v.OrgIDs) > 0 {
+			scopeOpts = append(scopeOpts, bson.M{"$and": bson.A{
+				bson.M{"scope": string(ScopeOrg)},
+				bson.M{"org_id": bson.M{"$in": toAny(v.OrgIDs)}},
+			}})
+		}
+		visible = append(visible, bson.M{"$and": bson.A{approved, bson.M{"$or": scopeOpts}}})
+	}
+	if v.Authenticated && v.UserID != "" {
+		visible = append(visible, bson.M{"submitted_by": v.UserID})
+	}
+	return bson.M{"$or": visible}
+}
+
+// toAny converts a []string to a bson.A for $in clauses.
+func toAny(in []string) bson.A {
+	out := make(bson.A, len(in))
+	for i, v := range in {
+		out[i] = v
+	}
+	return out
 }

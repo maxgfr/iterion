@@ -150,6 +150,77 @@ func Install(ctx context.Context, opts Options) (*Result, error) {
 	return res, nil
 }
 
+// InstallFromBotzBytes extracts a `.botz` archive streamed from r into a
+// temp dir, then installs it into the workspace exactly like Install:
+// validate the bundle, copy it into <workdir>/.botz/<name>, refresh the
+// catalog. The archive's manifest.name wins unless opts.Name overrides
+// it; opts.Source/Ref/Path are ignored (the bytes are the source). This
+// is the entry point behind the studio "Import .botz file" upload.
+func InstallFromBotzBytes(ctx context.Context, r io.Reader, opts Options) (*Result, error) {
+	tmp, err := os.MkdirTemp("", "iterion-botz-upload-*")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	extractDir := filepath.Join(tmp, "bundle")
+	if _, err := bundle.ExtractArchive(r, extractDir); err != nil {
+		return nil, fmt.Errorf("extract .botz: %w", err)
+	}
+	// Reuse Install's local-directory path: it validates via
+	// bundle.OpenDir, resolves the install name, copies into the
+	// workspace and regenerates the catalog.
+	o := opts
+	o.Source = extractDir
+	o.Ref = ""
+	o.Path = ""
+	res, err := Install(ctx, o)
+	if err != nil {
+		return nil, err
+	}
+	// The temp extract dir is the "source"; report it as an upload so the
+	// caller doesn't surface a throwaway /tmp path.
+	res.Source = "upload"
+	return res, nil
+}
+
+// Remove deletes an installed bot bundle (<workdir>/.botz/<name>) and
+// refreshes Nexie's catalog. A missing install is an error so the caller
+// can surface a 404. Mirrors Install's destination resolution.
+func Remove(_ context.Context, opts Options) error {
+	name := strings.TrimSpace(opts.Name)
+	if err := validateInstallName(name); err != nil {
+		return err
+	}
+	workdir := opts.Workdir
+	if workdir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		workdir = wd
+	}
+	dest := opts.Dest
+	if dest == "" {
+		dest = filepath.Join(workdir, ".botz")
+	}
+	target := filepath.Join(dest, name)
+	info, err := os.Stat(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%s is not installed", name)
+		}
+		return fmt.Errorf("stat %s: %w", target, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a bundle directory", target)
+	}
+	if err := os.RemoveAll(target); err != nil {
+		return fmt.Errorf("remove %s: %w", name, err)
+	}
+	_, _ = botregistry.RegenerateWhatsNextCatalog(workdir)
+	return nil
+}
+
 // splitSourceRef splits "url#ref" into (url, ref). A '#' whose prefix is an
 // existing local directory is treated as part of the path, not a ref marker.
 func splitSourceRef(src string) (url, ref string) {

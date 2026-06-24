@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -262,6 +264,63 @@ func (s *Server) handleBotInstall(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.httpErrorFor(w, r, http.StatusBadRequest, "bots: install: %v", err)
+		return
+	}
+	s.writeJSONFor(w, r, res)
+}
+
+// handleBotUpload imports a bot bundle from an uploaded `.botz` archive
+// into the workspace's .botz/ and returns the install result. Like
+// handleBotInstall it is workspace-mutating + LOCAL-MODE ONLY. The body
+// is multipart/form-data with a single `file` field (the .botz) plus an
+// optional `force` field ("true" overwrites an existing install — the
+// "update" path) and optional `name` override.
+func (s *Server) handleBotUpload(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSafeOrigin(w, r) {
+		return
+	}
+	if s.cfg.Mode == "cloud" {
+		s.httpErrorFor(w, r, http.StatusForbidden, "bots: upload is not available in cloud mode")
+		return
+	}
+	if s.cfg.WorkDir == "" {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "bots: no workspace configured to install into")
+		return
+	}
+	maxSize := s.cfg.MaxUploadSize
+	if maxSize <= 0 {
+		maxSize = 50 << 20
+	}
+	// MaxBytesReader covers the whole body even as ParseMultipartForm
+	// streams; ~16 KB headroom for the multipart envelope.
+	r.Body = http.MaxBytesReader(w, r.Body, maxSize+16<<10)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			s.httpErrorFor(w, r, http.StatusRequestEntityTooLarge, "bots: file exceeds max upload size (%d bytes)", maxSize)
+			return
+		}
+		s.httpErrorFor(w, r, http.StatusBadRequest, "bots: invalid multipart form: %v", err)
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "bots: missing 'file' field: %v", err)
+		return
+	}
+	defer file.Close()
+	force := strings.EqualFold(strings.TrimSpace(r.FormValue("force")), "true")
+	name := strings.TrimSpace(r.FormValue("name"))
+	// Bundle extraction enforces its own traversal/size/entry guards; the
+	// LimitReader is defence-in-depth so a lying Content-Length can't make
+	// the extractor read past the cap.
+	res, err := botinstall.InstallFromBotzBytes(r.Context(), io.LimitReader(file, maxSize+1), botinstall.Options{
+		Name:    name,
+		Force:   force,
+		Workdir: s.cfg.WorkDir,
+	})
+	if err != nil {
+		s.httpErrorFor(w, r, http.StatusBadRequest, "bots: upload: %v", err)
 		return
 	}
 	s.writeJSONFor(w, r, res)

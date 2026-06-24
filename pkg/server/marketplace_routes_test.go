@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/SocialGouv/iterion/pkg/botinstall"
+	"github.com/SocialGouv/iterion/pkg/bundle"
 	iterlog "github.com/SocialGouv/iterion/pkg/log"
 	"github.com/SocialGouv/iterion/pkg/marketplace"
 )
@@ -146,6 +149,81 @@ func TestMarketplace_SubmitListGetInstall(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workdir, ".botz", "mybot", "main.bot")); err != nil {
 		t.Errorf("bundle not installed: %v", err)
+	}
+}
+
+func TestMarketplace_InstallThenUninstall(t *testing.T) {
+	repo := t.TempDir()
+	writeFixtureBundle(t, repo, "mybot")
+	workdir := t.TempDir()
+	srv := newMarketplaceServer(t, workdir)
+
+	if rec := doJSON(t, srv, http.MethodPost, "/api/v1/marketplace/submit", `{"repo_url":"`+repo+`"}`); rec.Code != http.StatusOK {
+		t.Fatalf("submit = %d; %s", rec.Code, rec.Body.String())
+	}
+	if rec := doJSON(t, srv, http.MethodPost, "/api/v1/marketplace/bots/mybot/install", ""); rec.Code != http.StatusOK {
+		t.Fatalf("install = %d; %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(workdir, ".botz", "mybot", "main.bot")); err != nil {
+		t.Fatalf("not installed: %v", err)
+	}
+	// Update path: force re-install over the existing one must succeed.
+	if rec := doJSON(t, srv, http.MethodPost, "/api/v1/marketplace/bots/mybot/install?force=true", ""); rec.Code != http.StatusOK {
+		t.Fatalf("force re-install = %d; %s", rec.Code, rec.Body.String())
+	}
+	// Uninstall removes the bundle and returns the entry.
+	rec := doJSON(t, srv, http.MethodDelete, "/api/v1/marketplace/bots/mybot/install", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("uninstall = %d; %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(workdir, ".botz", "mybot")); !os.IsNotExist(err) {
+		t.Errorf("bundle still present after uninstall: %v", err)
+	}
+}
+
+func TestBots_UploadBotz(t *testing.T) {
+	// Pack a fixture into a .botz, then POST it to /api/v1/bots/upload.
+	src := t.TempDir()
+	writeFixtureBundle(t, src, "uploaded")
+	botz := filepath.Join(t.TempDir(), "uploaded.botz")
+	if _, err := bundle.PackDir(src, botz); err != nil {
+		t.Fatalf("pack: %v", err)
+	}
+	data, err := os.ReadFile(botz)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	workdir := t.TempDir()
+	srv := newMarketplaceServer(t, workdir)
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, err := mw.CreateFormFile("file", "uploaded.botz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	mw.Close()
+
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/bots/upload", &body)
+	r.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	srv.handler.ServeHTTP(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upload = %d; %s", rec.Code, rec.Body.String())
+	}
+	var res botinstall.Result
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
+	if res.Name != "uploaded" {
+		t.Errorf("name = %q", res.Name)
+	}
+	if _, err := os.Stat(filepath.Join(workdir, ".botz", "uploaded", "main.bot")); err != nil {
+		t.Errorf("uploaded bundle not installed: %v", err)
 	}
 }
 

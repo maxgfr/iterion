@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+
+	"github.com/SocialGouv/iterion/pkg/bundle"
 )
 
 // writeBundle creates a minimal bundle directory (main.bot + manifest.yaml).
@@ -149,5 +151,57 @@ func TestInstall_RepoIndexConvention(t *testing.T) {
 	}
 	if res.Name != "willy" {
 		t.Errorf("name: %q", res.Name)
+	}
+}
+
+func TestInstallFromBotzBytes_RoundTrip(t *testing.T) {
+	// Author a bundle, pack it to a .botz, then install from the packed
+	// bytes — exercising bundle.ExtractArchive + the Install reuse path.
+	src := t.TempDir()
+	writeBundle(t, src, "packed", 0)
+	botz := filepath.Join(t.TempDir(), "packed.botz")
+	if _, err := bundle.PackDir(src, botz); err != nil {
+		t.Fatalf("pack: %v", err)
+	}
+	f, err := os.Open(botz)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	dest := t.TempDir()
+	res, err := InstallFromBotzBytes(context.Background(), f, Options{Dest: dest, Workdir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("install from botz: %v", err)
+	}
+	if res.Name != "packed" {
+		t.Errorf("name: %q", res.Name)
+	}
+	if res.Source != "upload" {
+		t.Errorf("source = %q, want upload", res.Source)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "packed", "main.bot")); err != nil {
+		t.Errorf("main.bot not installed: %v", err)
+	}
+}
+
+func TestRemove(t *testing.T) {
+	repo := t.TempDir()
+	writeBundle(t, repo, "doomed", 0)
+	dest := t.TempDir()
+	workdir := t.TempDir()
+	if _, err := Install(context.Background(), Options{Source: repo, Dest: dest, Workdir: workdir}); err != nil {
+		t.Fatal(err)
+	}
+	// Remove resolves dest from opts.Dest, mirroring Install.
+	if err := Remove(context.Background(), Options{Name: "doomed", Dest: dest, Workdir: workdir}); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "doomed")); !os.IsNotExist(err) {
+		t.Errorf("bundle still present after remove: %v", err)
+	}
+	// Removing a non-existent install is an error (404 signal).
+	if err := Remove(context.Background(), Options{Name: "ghost", Dest: dest, Workdir: workdir}); err == nil {
+		t.Error("expected error removing missing install")
 	}
 }

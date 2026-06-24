@@ -9,7 +9,47 @@
 // actual install path is unchanged from Phase A.
 package marketplace
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// Scope controls who may browse an entry once it is approved. The zero
+// value ("") reads as ScopePublic via EffectiveScope so legacy flat
+// entries (written before scoping existed) stay world-visible.
+type Scope string
+
+const (
+	ScopePublic   Scope = "public"   // anyone, including unauthenticated, may browse
+	ScopeInstance Scope = "instance" // any authenticated user of this instance
+	ScopeOrg      Scope = "org"      // only members of OrgID
+)
+
+// Status is the moderation state of an entry. The zero value ("") reads
+// as StatusApproved via EffectiveStatus — local single-tenant entries
+// and pre-moderation registries are implicitly approved.
+type Status string
+
+const (
+	StatusPending  Status = "pending"
+	StatusApproved Status = "approved"
+	StatusRejected Status = "rejected"
+)
+
+// Source records how an entry's bundle is sourced. The zero value ("")
+// reads as SourceGit via EffectiveSource.
+type Source string
+
+const (
+	SourceGit     Source = "git"     // cloned from RepoURL (default)
+	SourceUpload  Source = "upload"  // uploaded .botz (see BundleRef)
+	SourceBuiltin Source = "builtin" // seeded from the host's bots/ catalog
+)
+
+// ErrStatusConflict is returned by SetStatus when the CAS guard fails
+// (the stored status no longer matches the expected one) — surfaced as
+// HTTP 409 by the moderation handlers.
+var ErrStatusConflict = errors.New("marketplace: status transition conflict")
 
 // Entry is one bot listing in the marketplace registry.
 //
@@ -71,6 +111,144 @@ type Entry struct {
 	// caller.
 	CreatedAt string `json:"created_at,omitempty" bson:"created_at,omitempty"`
 	UpdatedAt string `json:"updated_at,omitempty" bson:"updated_at,omitempty"`
+
+	// --- Multi-scope / moderation plumbing (cloud) ---
+	//
+	// All of these are omitempty and read through Effective* helpers so a
+	// legacy flat entry (none of them set) behaves exactly as before:
+	// public, approved, git-sourced. Local single-tenant mode leaves them
+	// empty; only cloud handlers populate them.
+
+	// Scope controls browse visibility once approved (see EffectiveScope).
+	Scope Scope `json:"scope,omitempty" bson:"scope,omitempty"`
+
+	// OrgID owns the entry when Scope == ScopeOrg (the submitting team).
+	OrgID string `json:"org_id,omitempty" bson:"org_id,omitempty"`
+
+	// Status is the moderation state (see EffectiveStatus).
+	Status Status `json:"status,omitempty" bson:"status,omitempty"`
+
+	// Source records how the bundle is sourced (see EffectiveSource).
+	Source Source `json:"source,omitempty" bson:"source,omitempty"`
+
+	// BundleRef points at an uploaded bundle when Source == SourceUpload.
+	// Reserved for a future cloud bundle-hosting backend; unused while
+	// uploads are a local-install convenience.
+	BundleRef string `json:"bundle_ref,omitempty" bson:"bundle_ref,omitempty"`
+
+	// SubmittedBy is the user id of the submitter (cloud). The submitter
+	// always sees their own entry regardless of moderation status.
+	SubmittedBy string `json:"submitted_by,omitempty" bson:"submitted_by,omitempty"`
+
+	// ReviewedBy / ReviewedAt / RejectReason record the moderation
+	// decision. RejectReason is shown back to the submitter.
+	ReviewedBy   string `json:"reviewed_by,omitempty" bson:"reviewed_by,omitempty"`
+	ReviewedAt   string `json:"reviewed_at,omitempty" bson:"reviewed_at,omitempty"`
+	RejectReason string `json:"reject_reason,omitempty" bson:"reject_reason,omitempty"`
+}
+
+// EffectiveStatus resolves the moderation status, treating the empty
+// zero value as approved (legacy / local entries).
+func EffectiveStatus(e Entry) Status {
+	if e.Status == "" {
+		return StatusApproved
+	}
+	return e.Status
+}
+
+// EffectiveScope resolves the visibility scope, treating the empty zero
+// value as public.
+func EffectiveScope(e Entry) Scope {
+	if e.Scope == "" {
+		return ScopePublic
+	}
+	return e.Scope
+}
+
+// EffectiveSource resolves the bundle source, treating the empty zero
+// value as a git clone.
+func EffectiveSource(e Entry) Source {
+	if e.Source == "" {
+		return SourceGit
+	}
+	return e.Source
+}
+
+// Visible reports whether viewer v may see entry e in a browse listing.
+// When v.Enforce is false (local single-tenant mode) every entry is
+// visible to the sole operator. Otherwise the rule is:
+//   - the submitter always sees their own entry (any status);
+//   - everyone else sees only approved entries within their scope reach
+//     (public → anyone, instance → any authenticated user, org → members
+//     of OrgID; a super-admin sees every approved entry).
+//
+// Moderation queues (pending/rejected for non-owners) are a separate
+// path — see ListForModeration — never surfaced through Visible.
+func Visible(e Entry, v ViewerContext) bool {
+	if !v.Enforce {
+		return true
+	}
+	if v.Authenticated && v.UserID != "" && e.SubmittedBy == v.UserID {
+		return true
+	}
+	if EffectiveStatus(e) != StatusApproved {
+		return false
+	}
+	switch EffectiveScope(e) {
+	case ScopePublic:
+		return true
+	case ScopeInstance:
+		return v.Authenticated
+	case ScopeOrg:
+		if v.IsSuperAdmin {
+			return true
+		}
+		for _, o := range v.OrgIDs {
+			if o == e.OrgID {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// ViewerContext describes the principal browsing the registry, used to
+// filter entries by scope + moderation status. The zero value (Enforce
+// false) means "local single-tenant operator" — no filtering at all.
+type ViewerContext struct {
+	// Enforce turns scope/status filtering on. Cloud handlers set it
+	// true; local mode leaves it false so the sole operator sees
+	// everything.
+	Enforce bool
+	// Authenticated is true when a verified identity backs the request.
+	Authenticated bool
+	// UserID is the authenticated user's id (owner-sees-own-entry rule).
+	UserID string
+	// OrgIDs are the teams the viewer belongs to (org-scope reach).
+	OrgIDs []string
+	// IsSuperAdmin grants platform-wide visibility.
+	IsSuperAdmin bool
+}
+
+// Review carries the moderation decision metadata stamped onto an entry
+// by SetStatus. By/At are RFC3339-stamped by the caller; Reason is the
+// rejection explanation shown to the submitter.
+type Review struct {
+	By     string
+	At     string
+	Reason string
+}
+
+// ModerationQuery selects entries for a moderation queue. Statuses
+// defaults to {StatusPending} when empty. When All is false the result
+// is restricted to OrgIDs (org admins); All=true returns every matching
+// entry (super-admin).
+type ModerationQuery struct {
+	Statuses []Status
+	OrgIDs   []string
+	All      bool
 }
 
 // EntryPreset is the slim, registry-facing slice of bundle.PresetSpec.
@@ -91,6 +269,10 @@ type Query struct {
 	// Tag, when set, requires an exact (case-insensitive) match in
 	// the entry's Tags.
 	Tag string
+	// Viewer scopes the listing to what the requesting principal may
+	// see (see Visible). The zero value (Enforce false) returns every
+	// entry — the local single-tenant default.
+	Viewer ViewerContext
 }
 
 // Store is the marketplace persistence interface. Two implementations
@@ -101,4 +283,17 @@ type Store interface {
 	Get(ctx context.Context, slug string) (*Entry, bool, error)
 	Upsert(ctx context.Context, e Entry) error
 	IncrementInstalls(ctx context.Context, slug string) error
+
+	// SetStatus transitions an entry's moderation status. When expect is
+	// non-empty it is a CAS guard: the update applies only when the
+	// stored EffectiveStatus equals expect, else ErrStatusConflict. The
+	// review metadata (reviewer/time/reason) is stamped onto the entry.
+	SetStatus(ctx context.Context, slug string, expect, next Status, review Review) error
+
+	// ListForModeration returns entries awaiting or holding a moderation
+	// decision, scoped per ModerationQuery.
+	ListForModeration(ctx context.Context, q ModerationQuery) ([]Entry, error)
+
+	// Delete removes an entry by slug. A missing slug is not an error.
+	Delete(ctx context.Context, slug string) error
 }

@@ -3,6 +3,7 @@ package bundle
 import (
 	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -160,6 +161,24 @@ func Open(path, cacheRoot string) (*Bundle, func() error, error) {
 	b.SourcePath = abs
 	b.Kind = KindBundle
 	return b, func() error { return nil }, nil
+}
+
+// ExtractArchive gunzips and untars a `.botz` stream from r into dest,
+// applying the same path-traversal / size / symlink guards as Open.
+// dest must be a directory the caller exclusively owns (it is created if
+// missing). Returns the number of regular files written.
+//
+// Unlike Open it does NOT cache, content-hash, or validate the bundle
+// structure — callers that need a validated Bundle follow with
+// OpenDir(dest). This is the in-memory entry point behind .botz uploads,
+// where the bytes arrive over HTTP rather than from a file on disk.
+func ExtractArchive(r io.Reader, dest string) (int, error) {
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return 0, fmt.Errorf("bundle: gzip: %w", err)
+	}
+	defer gz.Close()
+	return extractTarGz(gz, dest)
 }
 
 // OpenDir resolves an already-extracted bundle directory. Used by dev
