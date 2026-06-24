@@ -488,8 +488,15 @@ func (r *Run) populateWorkspace(ctx context.Context, hostSrc, podDst string) err
 	r.driver.logger.Info("sandbox: copying workspace %s into pod %s:%s", src, r.podName, podDst)
 
 	hostTar := exec.CommandContext(ctx, "tar", "-C", src, "-cf", "-", ".")
+	// --no-overwrite-dir: the archive's "./" root entry would otherwise make
+	// tar restore the source dir's mode+mtime onto podDst itself. podDst is the
+	// pod's /workspace emptyDir — root-owned and setgid (fsGroup) — so a
+	// non-root sandbox user can't chmod/utime it and tar exits 2 ("Cannot
+	// change mode to rwxr-sr-x" / "Cannot utime") even though every file
+	// extracted fine. Preserving the existing dir's metadata skips that final
+	// step while keeping the extracted files' own perms intact.
 	podTar := kubectlCmdContext(ctx, "--namespace", r.namespace,
-		"exec", "-i", r.podName, "--", "tar", "-C", podDst, "-xf", "-")
+		"exec", "-i", r.podName, "--", "tar", "-C", podDst, "--no-overwrite-dir", "-xf", "-")
 
 	pipe, err := hostTar.StdoutPipe()
 	if err != nil {
