@@ -170,6 +170,18 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 
 	podName := podNameFor(info.RunID)
 
+	// The in-pod workspace must live at the SAME absolute path the bot's
+	// tool/agent nodes use — RunInfo.WorkspacePath, the runner's worktree
+	// (= {{run.worktree}} / PROJECT_DIR) — exactly as the docker driver
+	// bind-mounts the worktree at its host absolute path. Otherwise the
+	// emptyDir mounts at /workspace while a tool node's `git -C <worktree>`
+	// hits a path that doesn't exist in the pod and fails (exit 128). This
+	// also keeps the container workingDir, the populate target, and every
+	// node's cwd aligned on the one path.
+	if info.WorkspacePath != "" {
+		p.workspace = info.WorkspacePath
+	}
+
 	// File secrets: create a per-run opaque Secret BEFORE the pod so the
 	// workload can mount each key as a read-only file. The Secret is
 	// deleted in Cleanup together with the pod.
@@ -226,6 +238,15 @@ func (d *Driver) Start(ctx context.Context, prepared sandbox.PreparedSpec, info 
 		}
 		return nil, fmt.Errorf("kubernetes: build manifest: %w", err)
 	}
+
+	// Resume idempotency: a prior attempt's pod may still exist (same run-id
+	// → same name). `kubectl apply` would then PATCH it, but pods are largely
+	// immutable and the runner SA intentionally lacks pods/patch → Forbidden,
+	// parking the run on the DLQ. Force-delete any stale pod so apply always
+	// CREATEs fresh; the resume re-populates the workspace from the checkpoint.
+	delStale := kubectlCmdContext(ctx, "--namespace", d.namespace, "delete", "pod", podName,
+		"--ignore-not-found=true", "--grace-period=0", "--force")
+	_, _ = delStale.CombinedOutput()
 
 	if err := applyManifest(ctx, d.namespace, manifest); err != nil {
 		if caSecretName != "" {
