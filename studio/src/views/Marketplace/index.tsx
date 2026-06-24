@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  approveModeration,
+  getMarketplaceConfig,
   installMarketplaceBot,
   listMarketplace,
+  listModerationQueue,
+  rejectModeration,
   submitMarketplaceBot,
   uninstallMarketplaceBot,
+  type MarketplaceConfig,
   type MarketplaceEntry,
 } from "@/api/marketplace";
 import { listBots } from "@/api/bots";
@@ -16,6 +21,7 @@ import { toastError } from "@/lib/errorHints";
 import { MarketplaceCard } from "./MarketplaceCard";
 import { MarketplaceDetail } from "./MarketplaceDetail";
 import { MarketplaceSubmit } from "./MarketplaceSubmit";
+import { ModerationQueue } from "./ModerationQueue";
 import {
   buildInstalledVersions,
   resolveInstalledState,
@@ -36,6 +42,34 @@ export default function MarketplaceView() {
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
   const [installed, setInstalled] = useState<InstalledVersions>(new Map());
+  const [config, setConfig] = useState<MarketplaceConfig | null>(null);
+  const [pending, setPending] = useState<MarketplaceEntry[]>([]);
+
+  // Config drives the submit scope picker; it's static so fetch once.
+  useEffect(() => {
+    getMarketplaceConfig()
+      .then(setConfig)
+      .catch(() => setConfig(null));
+  }, []);
+
+  // Best-effort moderation queue — populated only for admins (the
+  // endpoint 403s / 404s otherwise, leaving the section hidden). Used by
+  // the mutation handlers to refetch after an approve/reject/submit.
+  const refreshPending = useCallback(async () => {
+    try {
+      setPending(await listModerationQueue());
+    } catch {
+      setPending([]);
+    }
+  }, []);
+
+  // Initial load via a promise chain (no synchronous setState in the
+  // effect body) so the queue shows on first paint for admins.
+  useEffect(() => {
+    listModerationQueue()
+      .then(setPending)
+      .catch(() => setPending([]));
+  }, []);
 
   // Best-effort: reconcile the registry against the bots already in the
   // workspace so cards can show Installed / Update. A failure (e.g. cloud
@@ -108,15 +142,43 @@ export default function MarketplaceView() {
     ref?: string;
     path?: string;
     tags?: string[];
+    scope?: MarketplaceEntry["scope"];
   }) => {
     try {
       const stored = await submitMarketplaceBot(req);
-      addToast(`Added "${stored.display_name || stored.name}" to the marketplace`, "success");
+      const queued = config?.moderated && stored.status === "pending";
+      addToast(
+        queued
+          ? `Submitted "${stored.display_name || stored.name}" for review`
+          : `Added "${stored.display_name || stored.name}" to the marketplace`,
+        "success",
+      );
       await refresh();
-      setActiveSlug(stored.slug);
+      await refreshPending();
+      if (!queued) setActiveSlug(stored.slug);
     } catch (e) {
       toastError(addToast, e, "Submission failed");
       throw e;
+    }
+  };
+
+  const onApprove = async (slug: string) => {
+    try {
+      await approveModeration(slug);
+      addToast("Approved", "success");
+      await Promise.all([refresh(), refreshPending()]);
+    } catch (e) {
+      toastError(addToast, e, "Approve failed");
+    }
+  };
+
+  const onReject = async (slug: string, reason: string) => {
+    try {
+      await rejectModeration(slug, reason);
+      addToast("Rejected", "info");
+      await refreshPending();
+    } catch (e) {
+      toastError(addToast, e, "Reject failed");
     }
   };
 
@@ -165,7 +227,17 @@ export default function MarketplaceView() {
           </div>
         </section>
 
-        <MarketplaceSubmit onSubmit={onSubmit} onUploaded={() => void refresh()} />
+        <MarketplaceSubmit
+          onSubmit={onSubmit}
+          onUploaded={() => void refresh()}
+          scopes={config?.scopes}
+          defaultScope={config?.default_scope}
+          moderated={config?.moderated}
+        />
+
+        {pending.length > 0 && (
+          <ModerationQueue entries={pending} onApprove={onApprove} onReject={onReject} />
+        )}
 
         <section className="flex flex-col gap-2">
           <div className="flex items-center justify-between">

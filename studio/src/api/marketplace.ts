@@ -63,6 +63,19 @@ export interface SubmitMarketplaceRequest {
   ref?: string;
   path?: string;
   tags?: string[];
+  /** Visibility scope (cloud only; ignored in local mode). */
+  scope?: MarketplaceScope;
+}
+
+/** MarketplaceConfig mirrors GET /api/v1/marketplace/config — what the
+ *  submit form needs to render the scope picker and whether submissions
+ *  are moderated. */
+export interface MarketplaceConfig {
+  mode: "cloud" | "local";
+  submit_enabled: boolean;
+  scopes: MarketplaceScope[];
+  default_scope: MarketplaceScope;
+  moderated: boolean;
 }
 
 /** InstallMarketplaceResponse is the wire body returned by
@@ -129,5 +142,34 @@ export function uninstallMarketplaceBot(slug: string): Promise<MarketplaceEntry>
   return apiRequest<MarketplaceEntry>(
     `${BASE}/bots/${encodeURIComponent(slug)}/install`,
     { method: "DELETE" },
+  );
+}
+
+/** getMarketplaceConfig returns the registry's submit configuration
+ *  (allowed scopes, default, whether moderated). */
+export function getMarketplaceConfig(): Promise<MarketplaceConfig> {
+  return apiRequest<MarketplaceConfig>(`${BASE}/config`);
+}
+
+/** listModerationQueue returns the entries awaiting moderation, scoped to
+ *  the caller's admin reach. Cloud + admin only (403/404 otherwise). */
+export async function listModerationQueue(): Promise<MarketplaceEntry[]> {
+  const r = await apiRequest<ListResponse>(`${BASE}/moderation`);
+  return r.bots ?? [];
+}
+
+/** approveModeration approves a pending entry. */
+export function approveModeration(slug: string): Promise<MarketplaceEntry> {
+  return apiRequest<MarketplaceEntry>(
+    `${BASE}/moderation/${encodeURIComponent(slug)}/approve`,
+    { method: "POST" },
+  );
+}
+
+/** rejectModeration rejects a pending entry with an optional reason. */
+export function rejectModeration(slug: string, reason?: string): Promise<MarketplaceEntry> {
+  return apiRequest<MarketplaceEntry>(
+    `${BASE}/moderation/${encodeURIComponent(slug)}/reject`,
+    { method: "POST", body: JSON.stringify({ reason: reason ?? "" }) },
   );
 }

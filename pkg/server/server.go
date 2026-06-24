@@ -951,9 +951,14 @@ func (s *Server) routes() {
 	// MarketplaceEnabled in /api/server/info).
 	s.mux.HandleFunc("GET /api/v1/marketplace/bots", s.handleMarketplaceList)
 	s.mux.HandleFunc("POST /api/v1/marketplace/submit", s.handleMarketplaceSubmit)
+	s.mux.HandleFunc("GET /api/v1/marketplace/config", s.handleMarketplaceConfig)
 	s.mux.HandleFunc("GET /api/v1/marketplace/bots/{slug}", s.handleMarketplaceGet)
 	s.mux.HandleFunc("POST /api/v1/marketplace/bots/{slug}/install", s.handleMarketplaceInstall)
 	s.mux.HandleFunc("DELETE /api/v1/marketplace/bots/{slug}/install", s.handleMarketplaceUninstall)
+	// Moderation (cloud-only; handlers 404 in local mode).
+	s.mux.HandleFunc("GET /api/v1/marketplace/moderation", s.handleMarketplaceModerationList)
+	s.mux.HandleFunc("POST /api/v1/marketplace/moderation/{slug}/approve", s.handleMarketplaceApprove)
+	s.mux.HandleFunc("POST /api/v1/marketplace/moderation/{slug}/reject", s.handleMarketplaceReject)
 
 	// Health endpoints — liveness (always 200 if the mux is alive)
 	// and readiness (cloud-mode dependency pings come via T-26 when

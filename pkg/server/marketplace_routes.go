@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SocialGouv/iterion/pkg/auth"
 	"github.com/SocialGouv/iterion/pkg/botinstall"
 	"github.com/SocialGouv/iterion/pkg/botregistry"
 	"github.com/SocialGouv/iterion/pkg/marketplace"
@@ -19,6 +20,10 @@ type marketplaceSubmitRequest struct {
 	Ref     string   `json:"ref,omitempty"`
 	Path    string   `json:"path,omitempty"`
 	Tags    []string `json:"tags,omitempty"`
+	// Scope is the requested visibility (cloud only). Ignored in local
+	// mode. Validated against the server's allowed scopes; empty falls
+	// back to the configured default.
+	Scope string `json:"scope,omitempty"`
 }
 
 // marketplaceInstallResponse is what the install endpoint returns:
@@ -49,8 +54,9 @@ func (s *Server) handleMarketplaceList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := marketplace.Query{
-		Text: r.URL.Query().Get("q"),
-		Tag:  r.URL.Query().Get("tag"),
+		Text:   r.URL.Query().Get("q"),
+		Tag:    r.URL.Query().Get("tag"),
+		Viewer: s.marketplaceViewer(r),
 	}
 	entries, err := s.marketplace.List(r.Context(), q)
 	if err != nil {
@@ -82,6 +88,12 @@ func (s *Server) handleMarketplaceGet(w http.ResponseWriter, r *http.Request) {
 		s.httpErrorFor(w, r, http.StatusNotFound, "marketplace: %q not found", slug)
 		return
 	}
+	// Return 404 (not 403) when the entry exists but the viewer may not
+	// see it — never leak the existence of a scoped/pending slug.
+	if !marketplace.Visible(*e, s.marketplaceViewer(r)) {
+		s.httpErrorFor(w, r, http.StatusNotFound, "marketplace: %q not found", slug)
+		return
+	}
 	s.writeJSONFor(w, r, e)
 }
 
@@ -98,9 +110,17 @@ func (s *Server) handleMarketplaceSubmit(w http.ResponseWriter, r *http.Request)
 	if !s.requireSafeOrigin(w, r) {
 		return
 	}
-	if s.cfg.Mode == "cloud" {
-		s.httpErrorFor(w, r, http.StatusForbidden, "marketplace: submit is not available in cloud mode")
-		return
+	// Cloud submissions are authenticated and land pending moderation;
+	// local submissions are the sole operator's and auto-approve.
+	cloud := s.cfg.Mode == "cloud"
+	var submitter auth.Identity
+	if cloud {
+		id, ok := auth.FromContext(r.Context())
+		if !ok || id.UserID == "" {
+			s.httpErrorFor(w, r, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		submitter = id
 	}
 	var req marketplaceSubmitRequest
 	if err := readJSON(r, &req); err != nil {
@@ -139,8 +159,24 @@ func (s *Server) handleMarketplaceSubmit(w http.ResponseWriter, r *http.Request)
 		Version:     md.Version,
 		README:      md.README,
 		Presets:     toEntryPresets(md.Presets),
+		Source:      marketplace.SourceGit,
 		CreatedAt:   now,
 		UpdatedAt:   now,
+	}
+	if cloud {
+		// Resolve + validate the requested scope, land the entry pending,
+		// and stamp the submitter. Org-scoped slugs are namespaced by org
+		// so two orgs publishing the same bot name don't collide on the
+		// (slug == _id) key.
+		scope := s.resolveSubmitScope(req.Scope)
+		entry.Scope = marketplace.Scope(scope)
+		entry.Status = marketplace.StatusPending
+		entry.SubmittedBy = submitter.UserID
+		entry.OrgID = submitter.TeamID
+		if entry.Scope == marketplace.ScopeOrg && submitter.TeamID != "" {
+			entry.Slug = slug + "@" + submitter.TeamID
+			slug = entry.Slug
+		}
 	}
 	if err := s.marketplace.Upsert(r.Context(), entry); err != nil {
 		s.httpErrorFor(w, r, http.StatusInternalServerError, "marketplace: upsert: %v", err)

@@ -1,10 +1,17 @@
 import { useId, useRef, useState } from "react";
 
 import { uploadBotBundle } from "@/api/bots";
+import type { MarketplaceScope } from "@/api/marketplace";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useUIStore } from "@/store/ui";
 import { toastError } from "@/lib/errorHints";
+
+const SCOPE_LABELS: Record<MarketplaceScope, string> = {
+  public: "Public — anyone can browse",
+  instance: "Instance — any signed-in user",
+  org: "Org — only my organization",
+};
 
 interface Props {
   onSubmit: (req: {
@@ -12,10 +19,17 @@ interface Props {
     ref?: string;
     path?: string;
     tags?: string[];
+    scope?: MarketplaceScope;
   }) => Promise<void>;
   /** Called after a successful .botz upload so the parent can re-reconcile
    *  the installed-state of the cards. */
   onUploaded?: () => void | Promise<void>;
+  /** Visibility scopes the server allows (cloud). When more than one is
+   *  offered a scope picker is shown; submissions then land for review. */
+  scopes?: MarketplaceScope[];
+  defaultScope?: MarketplaceScope;
+  /** True when submissions land pending moderation (cloud). */
+  moderated?: boolean;
 }
 
 /** MarketplaceSubmit is the inline form for adding a repository to the
@@ -23,13 +37,20 @@ interface Props {
  *  (botinstall.Inspect); we surface the validation result via the
  *  parent's toast. Collapsed by default to keep the browse list above
  *  the fold. */
-export function MarketplaceSubmit({ onSubmit, onUploaded }: Props) {
+export function MarketplaceSubmit({
+  onSubmit,
+  onUploaded,
+  scopes,
+  defaultScope,
+  moderated,
+}: Props) {
   const addToast = useUIStore((s) => s.addToast);
   const [expanded, setExpanded] = useState(false);
   const [url, setUrl] = useState("");
   const [ref, setRef] = useState("");
   const [path, setPath] = useState("");
   const [tagsRaw, setTagsRaw] = useState("");
+  const [scope, setScope] = useState<MarketplaceScope | undefined>(defaultScope);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -37,6 +58,8 @@ export function MarketplaceSubmit({ onSubmit, onUploaded }: Props) {
   const refId = useId();
   const pathId = useId();
   const tagsId = useId();
+  const scopeId = useId();
+  const showScopePicker = (scopes?.length ?? 0) > 1;
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -76,6 +99,7 @@ export function MarketplaceSubmit({ onSubmit, onUploaded }: Props) {
         ref: ref.trim() || undefined,
         path: path.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
+        scope: showScopePicker ? scope : undefined,
       });
       reset();
       setExpanded(false);
@@ -162,10 +186,34 @@ export function MarketplaceSubmit({ onSubmit, onUploaded }: Props) {
               placeholder="review, kanban, sre"
             />
           </div>
+          {showScopePicker && (
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor={scopeId}
+                className="text-caption uppercase tracking-wide text-fg-subtle"
+              >
+                Visibility
+              </label>
+              <select
+                id={scopeId}
+                value={scope ?? ""}
+                onChange={(e) => setScope(e.target.value as MarketplaceScope)}
+                className="rounded border border-border-default bg-surface-1 px-2 py-1.5 text-xs text-fg-default focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              >
+                {scopes?.map((sc) => (
+                  <option key={sc} value={sc}>
+                    {SCOPE_LABELS[sc] ?? sc}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3">
             <p className="text-caption text-fg-subtle">
               The server clones the repo and validates the bundle (no install).
-              Submitting again with the same name refreshes the entry.
+              {moderated
+                ? " Your submission is queued for an admin to review before it appears."
+                : " Submitting again with the same name refreshes the entry."}
             </p>
             <Button
               variant="success"
