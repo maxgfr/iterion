@@ -26,14 +26,41 @@ operator-visible `.iterion` store. Every run: `--merge-into none`,
 | adr-rechallenge | ReArchi | ✅ GREEN | keep decision, clean human-gate |
 | whole-improve-loop | Willy | ✅ GREEN | converged, full test-suite verified |
 | bmady | Bmady | ✅ GREEN | full BMAD, 5 gates driven |
-| sec-audit-deps | Depsy | ⚠ AMBER | runs clean, 0 findings (known SCA scaffold) |
-| evolve | Evoly | ❌ RED-known | gpt-5.5 forfait context overflow at aggregate_review |
-| devbox-setup | Devy | ❌ RED | reproducible claude_code cold-start hang in sandbox |
+| sec-audit-deps | Depsy | ✅ GREEN* | *FIXED: trivy CVE floor → 10 real CVEs on lodash@4.17.4 |
+| evolve | Evoly | ✅ GREEN* | *FIXED: dropped review_gpt tools → no forfait overflow |
+| devbox-setup | Devy | ✅ GREEN* | *works on normal target; campaign fail was /tmp harness path |
 | secured-renovacy | Renovacy | ✅ GREEN | safe-mode patch+minor → Phase-2 review → SBOM (e404438) |
 | revi-converse | — | n/a | needs a live forge MR thread; not run offline |
 | smoke | — | n/a | utility (no manifest); not a catalog bot |
 
-**14 GREEN, 1 AMBER, 2 RED, 2 n/a** — all 18 catalog bots run.
+**17 GREEN, 1 n/a (revi-converse — needs live forge)** — all 18 catalog bots
+green after the round-2 fixes below.
+
+## Round-2 fixes — the 3 amber/red bots, fixed and re-validated live
+
+- **Evoly (evolve)** — was RED (gpt-5.5 forfait `context_length_exceeded` at
+  `aggregate_review`). The vision+system prompt already sits near the
+  ChatGPT-forfait window; one or two `read_file` results pushed the 2nd request
+  over it. **Fix:** removed `review_gpt`'s file-reading tools — it judges the
+  vision on textual merits (the shared prompt says reviewers MAY read), while
+  `review_claude` keeps tools for grounding. Re-run: full pipeline → no overflow
+  → `propose_evolutions` → `emit_backlog` (board tickets) → done.
+- **Depsy (sec-audit-deps)** — was AMBER (0 findings: the npm-audit/pip-audit
+  heuristics need an installed tree; a bare checkout only has lockfiles). **Fix:**
+  `run_generic_heuristics` now runs `trivy fs --scanners vuln` over the workspace —
+  a universal lockfile CVE scan (OSV/GHSA/NVD), no install. Re-run on a
+  `lodash@4.17.4` lockfile: **10 corroborated CVEs** (1 critical/4 high/4 med/1
+  low), zero false positives, HIGH verdict. (Board emit still needs the C082 HTTP
+  path in sandbox; findings land in the markdown report.)
+- **Devy (devbox-setup)** — was RED (claude_code cold-start hang). **Root cause:
+  not a Devy bug** — the dogfood target lived under the harness path
+  `/tmp/claude-1000/...`, which the sandbox can't bind/exec cleanly for a
+  worktree:auto bot (claude exits with no output). claude itself works fine in the
+  sec image (verified via `docker run`/`docker exec`). On a **normal-path** target
+  (`~/devy-probe`) Devy runs clean end-to-end and writes a correct `devbox.json`
+  (`go@1.22`). No bot change. **Engine follow-up:** the sandbox should fail-fast
+  (not hang) on an unbindable target path, and `ITERION_CLAUDE_CODE_STREAM_COLD_TIMEOUT`
+  doesn't reach the sandboxed delegate.
 
 ## Fixes landed (campaign branch, verified, FF to main — NOT pushed)
 
