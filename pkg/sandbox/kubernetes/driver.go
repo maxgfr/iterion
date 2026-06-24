@@ -487,14 +487,26 @@ func (r *Run) populateWorkspace(ctx context.Context, hostSrc, podDst string) err
 	src := resolveCloneRoot(ctx, hostSrc)
 	r.driver.logger.Info("sandbox: copying workspace %s into pod %s:%s", src, r.podName, podDst)
 
-	hostTar := exec.CommandContext(ctx, "tar", "-C", src, "-cf", "-", ".")
-	// --no-overwrite-dir: the archive's "./" root entry would otherwise make
-	// tar restore the source dir's mode+mtime onto podDst itself. podDst is the
-	// pod's /workspace emptyDir — root-owned and setgid (fsGroup) — so a
-	// non-root sandbox user can't chmod/utime it and tar exits 2 ("Cannot
-	// change mode to rwxr-sr-x" / "Cannot utime") even though every file
-	// extracted fine. Preserving the existing dir's metadata skips that final
-	// step while keeping the extracted files' own perms intact.
+	// Archive the worktree CONTENTS by name, never the "." root entry. A "./"
+	// archive member makes the in-pod tar restore the source dir's mode+mtime
+	// onto podDst itself — the pod's /workspace emptyDir, which is root-owned
+	// (and setgid via fsGroup) — and the non-root sandbox user can't chmod/utime
+	// it, so tar exits 2 ("Cannot change mode to …" / "Cannot utime") even though
+	// every file extracted fine. Listing the top-level entries omits the root
+	// member, so tar only ever creates files *inside* the existing /workspace.
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return fmt.Errorf("read workspace source %s: %w", src, err)
+	}
+	if len(entries) == 0 {
+		return nil // nothing to copy
+	}
+	tarArgs := []string{"-C", src, "-cf", "-"}
+	for _, e := range entries {
+		tarArgs = append(tarArgs, e.Name())
+	}
+	hostTar := exec.CommandContext(ctx, "tar", tarArgs...)
+	// --no-overwrite-dir stays as defence in depth for any pre-existing subdir.
 	podTar := kubectlCmdContext(ctx, "--namespace", r.namespace,
 		"exec", "-i", r.podName, "--", "tar", "-C", podDst, "--no-overwrite-dir", "-xf", "-")
 
