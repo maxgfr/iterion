@@ -47,7 +47,16 @@ function isEditableNode(id: string): boolean {
   return id !== "__start__" && id !== "done" && id !== "fail" && !isAuxiliaryNodeId(id) && !isGroupNodeId(id);
 }
 
-export default function Canvas() {
+interface CanvasProps {
+  // Whether the hosting editor tab is currently visible. Inactive tabs
+  // stay mounted with display:none; React Flow can't measure a hidden
+  // container, so when the tab is shown again we restore the saved
+  // viewport (or refit) to avoid a blank canvas. Defaults to true so
+  // standalone mounts behave unchanged.
+  active?: boolean;
+}
+
+export default function Canvas({ active = true }: CanvasProps) {
   const addNode = useAddNode();
   const addFromLibrary = useAddFromLibrary();
   const addSubNode = useAddSubNode();
@@ -193,6 +202,34 @@ export default function Canvas() {
       setTimeout(() => fitView({ padding: 0.2 }), DEBOUNCE_LAYOUT_SETTLE_MS);
     }
   }, [subNodeViewStack, fitView, getViewport, setViewport]);
+
+  // Restore the viewport when this tab regains visibility. EditorTabsView
+  // keeps inactive tabs mounted with display:none; React Flow can't
+  // measure a 0×0 container, so a tab returned to focus would otherwise
+  // render blank. We snapshot the viewport just before the tab is hidden
+  // and re-apply it once the container is visible again (fitView is the
+  // fallback when nothing was saved). Mirrors the sub-node save/restore
+  // pattern above.
+  const wasActiveRef = useRef(active);
+  const tabViewportRef = useRef<Viewport | null>(null);
+  useEffect(() => {
+    if (active === wasActiveRef.current) return;
+    wasActiveRef.current = active;
+    if (!active) {
+      // Going hidden: remember the still-correct viewport.
+      tabViewportRef.current = getViewport();
+      return;
+    }
+    // Becoming visible: re-apply once layout settles (the container is
+    // measurable again after the display:none → block flip).
+    const t = setTimeout(() => {
+      if (getNodes().length === 0) return; // avoid React Flow's empty-fit warning
+      const saved = tabViewportRef.current;
+      if (saved) setViewport(saved);
+      else fitView({ padding: 0.2 });
+    }, DEBOUNCE_LAYOUT_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [active, getViewport, setViewport, fitView, getNodes]);
 
   // Apply search filter: dim non-matching nodes, highlight current match.
   // Note: applySearchFilter is intentionally excluded from deps — its internal

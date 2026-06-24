@@ -22,7 +22,17 @@ import { DISCARD_CHANGES_PROMPT } from "@/lib/copy";
 import { toastError } from "@/lib/errorHints";
 import * as api from "@/api/client";
 
-export default function EditorView() {
+interface EditorViewProps {
+  // Whether this editor tab is currently the visible one. EditorTabsView
+  // keeps inactive tabs mounted with display:none; the Canvas uses this
+  // to refit its viewport when the tab regains visibility (React Flow
+  // measured at 0×0 while hidden otherwise renders blank on return).
+  // Defaults to true so a standalone EditorView (deep-link fallback,
+  // tests) behaves exactly as before.
+  active?: boolean;
+}
+
+export default function EditorView({ active = true }: EditorViewProps) {
   // The active per-tab document store (or the module default when this
   // view is mounted outside an EditorTabHost — e.g. a deep-linked
   // /editor route in the fallback Switch).
@@ -222,7 +232,7 @@ export default function EditorView() {
 
         <div className="min-h-0 flex">
           <div className={sourceViewOpen && !expanded ? "w-1/2 h-full" : "w-full h-full"}>
-            <Canvas />
+            <Canvas active={active} />
           </div>
           {sourceViewOpen && !expanded && (
             <div className="w-1/2 h-full border-l border-border-default">

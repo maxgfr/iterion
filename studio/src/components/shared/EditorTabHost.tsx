@@ -41,6 +41,12 @@ export default function EditorTabHost({ tabId, file }: Props) {
   const docStore = useMemo(() => getOrCreateDocumentStore(tabId), [tabId]);
   const selStore = useMemo(() => getOrCreateSelectionStore(tabId), [tabId]);
   const addToast = useUIStore((s) => s.addToast);
+  // Visibility of this tab. EditorTabsView keeps every hydrated tab
+  // mounted with display:none on inactive ones; React Flow mounted in a
+  // hidden container can't measure and ends up blank when re-shown, so
+  // the Canvas needs to know when it regains visibility to refit the
+  // viewport. Drives that signal down through EditorView.
+  const isActive = useTabsStore((s) => s.activeEditorTabId === tabId);
 
   // Initial file hydration. We trigger it once per (tabId, file). If
   // the file changes via deep-link navigation later we let EditorView's
@@ -78,7 +84,7 @@ export default function EditorTabHost({ tabId, file }: Props) {
         <TabLabelSync tabId={tabId} />
         <ErrorBoundary area="Editor view" resetKey={tabId}>
           <Suspense fallback={<MainSpinner />}>
-            <EditorView />
+            <EditorView active={isActive} />
           </Suspense>
         </ErrorBoundary>
       </SelectionStoreProvider>
