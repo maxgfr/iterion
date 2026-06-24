@@ -4,6 +4,29 @@ Autonomous end-to-end feature development: plan → act → `/simplify` →
 prepare_commit → alternating Claude/GPT review-fix loop → commit, in an isolated
 `worktree: auto`. See [bots/feature-dev/](../../bots/feature-dev/).
 
+## 2026-06-24 — k8s cloud-sandbox hardening campaign (8 fixes; feature-dev = first sandboxed bot on k8s)
+- Status: **partial** — the sandbox **infrastructure** is now validated end-to-end on the deployed preprod (ovh-dev) k8s runner: each `/featurly` on project 194 issue !2 advanced the run one stage, and it now reaches **post_create executing inside the sandbox pod** (pod created, baked image pulled, pod Ready). The bot still can't complete because preprod's `iterion-llm` secret has **no LLM creds** (placeholder) — a green run (bot implements + opens the MR) needs a creds decision, below. **This is the FIRST sandboxed bot ever run on the kubernetes sandbox driver**, so the path was entirely unexercised; 8 durable engine/chart/image fixes resulted.
+- Versions: iterion main `89ed642dc → c4364319f` · chart `v0.17.2`.
+- Method: live webhook (`/featurly` comment) → preprod runner → k8s sandbox (`sandbox-full:edge`, user 1000:1000). claude_code implementer + claw gpt-5.5 reviewers + `forge_token`.
+
+### The 8 fixes (each surfaced by the next `/featurly`)
+1. **`ITERION_POD_IP`** (downward API `status.podIP`) — chart 0.16.1; the k8s network proxy needs a routable advertise address. Gated on `runner.sandbox.enabled`.
+2. **host_state** — `ITERION_SANDBOX_HOST_STATE=none` in the configmap (chart) **+ an engine bug**: the cloud runner (`pkg/runner/loop.go`) read `cfg.Sandbox.HostState` from the env then **dropped it** — never wired it to the engine like `pkg/cli/run.go` does for `iterion run`. `89ed642dc` threads it through `runner.Config` → engine opts.
+3. **claw binary in-sandbox** — sandboxed claw shells to `iterion __claw-runner` in-container; docker bind-mounts the host binary but k8s has no host fs. Bake static iterion into the sandbox images (`FROM ${ITERION_IMAGE} AS iterion-bin` + COPY; image.yml `needs: build`) + gate the host bind-mount on a new `Capabilities.SupportsHostBindMounts` (docker true / k8s+noop false). `1ca693d42`.
+4. **per-run Secrets RBAC** — the driver creates per-run Secrets (`forge_token` `as:file` + proxy TLS CA); the runner SA lacked `secrets`. chart `v0.17.2` (`fb03b4e5a`): get/create/update/patch/delete, no list/watch (least privilege).
+5. **drop docker-only host bind mounts** — feature-dev's `~/.claude` OAuth mount (`type=bind` + the docker-only `consistency=` key) hard-failed k8s manifest build. The runtime drops `type=bind` on a no-host-fs driver (reuse `SupportsHostBindMounts`; `dropHostBindMounts`/`mountIsHostBind`, unit-tested). `25b04eb71`.
+6. **imagePullPolicy=Always** for mutable sandbox tags (`IfNotPresent` for `@sha256`) — a stale node-cached `:edge` mustn't shadow a fresh CI bake. `25b04eb71`.
+7. **drop ALL host binds** — fix 5's filter ran before the mount block, missing the runtime's own optional binds (the **bundle** mount `/opt/iterion/bots/<bot> → /run/iterion/bundle`). Moved it after the block → catches bot mounts + bundle/attachments/run-files. Skills still reach the sandbox via the workspace mirror (`<workspace>/.claude/skills`). `6c794e05d`.
+8. **claude_code CLI bake** — post_create installs the CLI via `sudo npm install -g`, but the k8s pod is `runAsNonRoot`/`allowPrivilegeEscalation=false`, so sudo can't escalate → post_create exits 1. Bake the pinned llm-clis (`claude-code 2.1.175`) into the sandbox slim image + symlink `claude` onto PATH; post_create's `claude --version` then passes, skipping the sudo branch. `c4364319f` (final image build in flight at time of writing).
+
+### Remaining blocker — CREDS (operator decision, not code)
+The preprod runner has **no** LLM creds (`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` all empty; `iterion-llm` is a placeholder — Revi's live e2e ran on **ovh-prod**, which has real keys). There is also a deeper **creds-to-sandbox-user** gap: claude_code gets `ANTHROPIC_API_KEY` forwarded by its delegate into the sandbox exec (works *if the runner has a key*), but **claw (gpt) reads `~/.codex`** (the ChatGPT forfait), which host_state mounts at the *host* path while the sandbox runs as `devbox` (`/home/devbox`) — there is **no `.codex` bridge** like the `.claude` one. A green "bot-runs-in-sandbox" e2e therefore needs (a) real LLM creds in preprod `iterion-llm`, and (b) a decision on forwarding provider creds into the sandbox env for **both** providers (vs per-provider mounts). Both are the operator's call.
+
+### Lessons for next run
+- feature-dev (any claude_code+claw bot) on the k8s sandbox is unblocked at the **infrastructure** level — the only remaining gap is creds.
+- **docker (web-local + desktop) is preserved by construction**: every fix is gated on `SupportsHostBindMounts` (true for docker) or is additive (image bakes), so docker keeps host bind-mounts (OAuth via `~/.claude`) unchanged.
+- Engine hardening lives on `origin/main`: `89ed642dc 1ca693d42 fb03b4e5a 25b04eb71 6c794e05d c4364319f` (+ chart `v0.17.2`).
+
 ## 2026-06-24 — issue-comment → improvement-MR e2e on preprod (run 019ef703)
 - Status: **partial** — the feature's TRIGGER half validated live on preprod (GitLab issue comment → `feature_dev` run launched); the bot run then failed on a pre-existing preprod infra gap, NOT the feature.
 - Versions: bot feature-dev 0.1.0 (+ new `finalize_mr` tail) · iterion preprod `:edge` @`0f1d8d670` (this work) · webhook-launched on the cloud runner (sandbox).
