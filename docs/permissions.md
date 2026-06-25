@@ -157,4 +157,5 @@ identically whichever backend executes it.
 - `pkg/backend/permission/` — the matcher + Policy (single source of truth)
 - `docs/rtk.md` — the sibling opt-in `rtk:` field this mirrors
 - Diagnostics: **C110** (invalid permission mode), **C111** (rules
-  declared but gate off).
+  declared but gate off), **C112** (tool-node `permission:` — parsed but
+  not enforced).

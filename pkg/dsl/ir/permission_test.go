@@ -253,3 +253,49 @@ workflow w:
 		expectNoDiag(t, r, DiagPermissionRulesNoGate)
 	})
 }
+
+// TestToolNodePermissionInert verifies C112 warns when a tool node sets a
+// non-off permission mode (parsed but not enforced — the gate only governs
+// agent/judge LLM tool calls), and stays silent for agent/judge nodes.
+func TestToolNodePermissionInert(t *testing.T) {
+	t.Run("tool_node_deny_warns", func(t *testing.T) {
+		src := `
+schema empty:
+  ok: bool
+
+agent start:
+  model: "test-model"
+  output: empty
+
+tool ship:
+  command: "true"
+  output: empty
+  permission: deny
+
+workflow w:
+  entry: start
+  start -> ship
+  ship -> done
+`
+		r := compileFile(t, src)
+		expectDiag(t, r, DiagToolNodePermissionInert)
+	})
+
+	t.Run("agent_node_ask_silent", func(t *testing.T) {
+		src := `
+schema empty:
+  ok: bool
+
+agent start:
+  model: "test-model"
+  output: empty
+  permission: ask
+
+workflow w:
+  entry: start
+  start -> done
+`
+		r := compileFile(t, src)
+		expectNoDiag(t, r, DiagToolNodePermissionInert)
+	})
+}

@@ -101,6 +101,7 @@ const (
 	DiagVarDefaultTypeMismatch  DiagCode = "C109" // a var's default literal type does not match its declared type (error)
 	DiagInvalidPermission       DiagCode = "C110" // permission: value not one of off|ask|deny (error)
 	DiagPermissionRulesNoGate   DiagCode = "C111" // allow/ask/deny rules declared but the resolved permission mode is "" or off (warning)
+	DiagToolNodePermissionInert DiagCode = "C112" // permission: on a tool node — parsed but not enforced (warning)
 )
 
 // validate performs static validation on a compiled workflow.
@@ -215,6 +216,18 @@ func (c *compiler) validatePermission(w *Workflow) {
 			c.errorf(DiagInvalidPermission,
 				"%s %q has invalid permission %q; valid values are off, ask, deny",
 				kind, n.NodeID(), perm)
+			continue
+		}
+		// C112: the gate evaluates LLM-issued tool calls; a tool node is a
+		// direct, deterministic shell action (governed by the Verified
+		// Action quad), so its permission: is parsed but never enforced.
+		// Warn so an operator doesn't ship an inert security control.
+		if kind == "tool" {
+			if m := strings.ToLower(strings.TrimSpace(perm)); m == "ask" || m == "deny" {
+				c.warnf(DiagToolNodePermissionInert,
+					"tool node %q sets permission: %s, but the gate only governs agent/judge LLM tool calls; a tool node's permission is not enforced (use goal/postcondition/policy/recovery to gate the action)",
+					n.NodeID(), m)
+			}
 		}
 	}
 
