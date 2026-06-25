@@ -62,16 +62,21 @@ long-running and automated runs never read a stale token. A manual
 
 ## Configuration
 
+Nothing needs to be provisioned for Anthropic: the client id defaults to
+the **public** Claude Code OAuth client (`9d1c250a-…`, a PKCE public
+client with no secret), so the browser flow works out of the box. All
+values are overridable per deployment:
+
 | Env var | Purpose |
 | --- | --- |
-| `ITERION_OAUTH_FORFAIT_ANTHROPIC_CLIENT_ID` | Claude Code OAuth client id (required to connect/refresh Anthropic). |
+| `ITERION_OAUTH_FORFAIT_ANTHROPIC_CLIENT_ID` | Claude Code OAuth client id. **Defaults** to the public client; override only if Anthropic rotates it. |
 | `ITERION_OAUTH_FORFAIT_OPENAI_CLIENT_ID` | Codex OAuth client id (refresh). |
 | `ITERION_OAUTH_FORFAIT_ANTHROPIC_AUTHORIZE_URL` | Override the authorize endpoint (default `https://claude.ai/oauth/authorize`). |
 | `ITERION_OAUTH_FORFAIT_ANTHROPIC_REDIRECT_URI` | Override the headless redirect (default `https://platform.claude.com/oauth/code/callback`). |
 | `ITERION_OAUTH_FORFAIT_ANTHROPIC_SCOPES` | Override the requested scopes. |
 
-The browser connect flow is only available when both a store and the
-Anthropic client id are configured.
+The browser connect flow is available whenever the OAuth store is wired
+(cloud mode) — the client id is defaulted, so no extra config is needed.
 
 ### Storage & isolation
 

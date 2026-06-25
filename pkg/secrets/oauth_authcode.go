@@ -31,6 +31,14 @@ import (
 // All values are env-overridable because this is an undocumented,
 // reverse-engineered surface: if Anthropic rotates the client/flow,
 // an operator can re-point it without a rebuild.
+// DefaultAnthropicOAuthClientID is the public Claude Code OAuth client
+// id. It is a PUBLIC PKCE client (no client secret), the same id the
+// `claude` CLI embeds — not a confidential value. Shipping it as a
+// default lets the browser connect flow work out of the box; an operator
+// can still override it via ITERION_OAUTH_FORFAIT_ANTHROPIC_CLIENT_ID if
+// Anthropic rotates the client.
+const DefaultAnthropicOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+
 const (
 	defaultAnthropicAuthorizeURL = "https://claude.ai/oauth/authorize"
 	// The headless redirect that displays the code for copy/paste. This

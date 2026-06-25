@@ -9,6 +9,8 @@ package config
 import (
 	"fmt"
 	"time"
+
+	"github.com/SocialGouv/iterion/pkg/secrets"
 )
 
 // Mode selects the persistence/dispatch backend.
@@ -318,6 +320,13 @@ func Defaults() Config {
 					Scopes:      []string{"openid", "email", "profile"},
 					DisplayName: "SSO",
 				},
+			},
+			// The Anthropic forfait client id defaults to the public
+			// Claude Code OAuth client (a public PKCE client, not a
+			// secret) so the browser connect flow works without any
+			// per-deployment config; env/yaml still override it.
+			OAuthForfait: OAuthForfaitConfig{
+				AnthropicClientID: secrets.DefaultAnthropicOAuthClientID,
 			},
 		},
 	}
