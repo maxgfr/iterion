@@ -47,6 +47,35 @@ A hard `max_evals` budget and the cooldown keep token cost bounded;
 supervision degrades to a silent no-op when the budget is exhausted —
 it never eats the supervised run's budget.
 
+## Declaring a supervisor in a `.bot` (primary path)
+
+Declare the supervisor inline in the workflow it watches — a top-level
+`supervisor <name>:` block, alongside `cursor`/`schema`/`prompt`. It is
+**not a graph node**: the engine spawns it concurrently at run start and
+arms it only while a watched node is active. Multiple supervisors are
+allowed (each watching a different node set).
+
+```
+supervisor watchdog:
+  watches: [implement, fix]            # agent node(s) to steer (omit = whole run)
+  model: "anthropic/claude-opus-4-8"  # default: auto-detect / ITERION_DEFAULT_SUPERVISOR_MODEL
+  system: watchdog_policy              # a prompt: ref — the supervision policy
+  cooldown: "45s"                      # min between turn-boundary evals (default 30s)
+  max_evals: 12                        # hard eval cap (default 20)
+
+prompt watchdog_policy:
+  Intervene only if the implementer edits files outside src/, or a Bash
+  test fails twice in a row. Keep messages short and actionable.
+```
+
+Launch the workflow normally (`iterion run`); the supervisor is
+auto-spawned, observes the run, and is torn down when the run ends. The
+`watches:` ids must name agent nodes (a warning `C190` fires otherwise),
+and `system:` must reference a declared prompt (`C193`). Monitors aren't
+declared in the DSL — the supervisor bot registers the patterns it cares
+about at runtime; use the CLI `--monitor` flag to pre-seed them when
+attaching externally.
+
 ## Attaching a supervisor to a running run (CLI)
 
 ```sh
@@ -98,11 +127,8 @@ main token-saver.
 
 ## Roadmap
 
-- **In-`.bot` `supervisor <name>:` declaration** — declare a supervisor
-  inline in the workflow it watches (`watches: [implement]`, `model:`,
-  `system:`), auto-spawned by the engine when the run starts. The
-  primary authoring path; the CLI above is the attach path for runs that
-  did not declare one.
 - **Raw Claude Code session bridge** — supervise a raw `claude` CLI/VSCode
   session (no `.bot`) by tailing its transcript and injecting via a
   `settings.json` Stop/PostToolUse hook that drains an iterion inbox.
+- **Inline `monitors:` in the DSL block** — today monitors are registered
+  by the bot at runtime or pre-seeded via the CLI `--monitor` flag.

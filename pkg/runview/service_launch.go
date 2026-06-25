@@ -386,6 +386,12 @@ func (s *Service) spawnRun(
 			defer cancelTimeout()
 		}
 
+		// Spawn any DSL-declared supervisors for the lifetime of the run.
+		// They observe via the broker (in-process) and steer via
+		// QueueMessage; Close drains them before the goroutine exits.
+		stopSupervisors := s.startDeclaredSupervisors(ctx, runID, wf, runLogger)
+		defer stopSupervisors()
+
 		bodyErr := body(ctx, eng)
 		s.logRunOutcome(runID, bodyErr)
 		// Fire the run-completion webhook (no-op unless the run carries a

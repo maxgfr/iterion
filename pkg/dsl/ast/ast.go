@@ -16,6 +16,7 @@ type File struct {
 	Prompts     []*PromptDecl     // prompt declarations
 	Schemas     []*SchemaDecl     // schema declarations
 	Cursors     []*CursorDecl     // cursor declarations (prompt-engineering dials)
+	Supervisors []*SupervisorDecl // supervisor declarations (concurrent node-watchers)
 	Agents      []*AgentDecl      // agent node declarations
 	Judges      []*JudgeDecl      // judge node declarations
 	Routers     []*RouterDecl     // router node declarations
@@ -312,6 +313,26 @@ type CursorSetting struct {
 	Key   string
 	Value string
 	Span  Span
+}
+
+// ---------------------------------------------------------------------------
+// Supervisors — concurrent node-watchers
+// ---------------------------------------------------------------------------
+
+// SupervisorDecl is a top-level `supervisor <name>:` declaration. A
+// supervisor is NOT a graph node: it is a concurrent watcher the engine
+// spawns at run start, armed only while one of its watched nodes is the
+// active node. It enqueues steering messages the supervised node picks
+// up at its next turn (node-scoped so a late message can't leak into the
+// next node). See docs/supervisors.md.
+type SupervisorDecl struct {
+	Name     string
+	Watches  []string // agent node ids to watch; empty = whole run
+	Model    string   // claw model spec; empty = auto-detect / ITERION_DEFAULT_SUPERVISOR_MODEL
+	System   string   // prompt reference name (the supervision policy)
+	Cooldown string   // raw duration string ("30s"); parsed by the IR compiler
+	MaxEvals int      // hard cap on LLM evaluations (0 = default)
+	Span     Span
 }
 
 // ---------------------------------------------------------------------------

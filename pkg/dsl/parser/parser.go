@@ -225,6 +225,11 @@ func (p *parser) parseFile() *ast.File {
 				f.Cursors = append(f.Cursors, cd)
 			}
 
+		case TokenSupervisor:
+			if sd := p.parseSupervisorDecl(); sd != nil && !p.isReservedName(t, sd.Name, "supervisor") {
+				f.Supervisors = append(f.Supervisors, sd)
+			}
+
 		case TokenAgent:
 			if ad := p.parseAgentDecl(); ad != nil && !p.isReservedName(t, ad.Name, "agent") {
 				f.Agents = append(f.Agents, ad)
@@ -997,6 +1002,66 @@ func (p *parser) parseCursorBands() []*ast.CursorBand {
 		})
 	}
 	return out
+}
+
+// parseSupervisorDecl parses a top-level `supervisor <name>:`
+// declaration: a concurrent node-watcher (see docs/supervisors.md).
+// Scalar fields plus a `watches:` ident list. Monitors are not declared
+// here — the supervisor bot registers them at runtime — keeping the
+// grammar small.
+func (p *parser) parseSupervisorDecl() *ast.SupervisorDecl {
+	start, name, ok := p.parseDeclHeader("supervisor")
+	if !ok {
+		return nil
+	}
+	sd := &ast.SupervisorDecl{
+		Name: name,
+		Span: ast.Span{Start: p.pos(start), End: p.pos(start)},
+	}
+	for {
+		p.skipNewlines()
+		t := p.peek()
+		if t.Type == TokenDedent || t.Type == TokenEOF {
+			if t.Type == TokenDedent {
+				p.next()
+			}
+			break
+		}
+		propName := tokenAsIdent(t)
+		if propName == "" {
+			p.addError(DiagUnexpectedToken, t, "unexpected token in supervisor block: "+t.Value)
+			p.next()
+			p.skipToNewline()
+			continue
+		}
+		p.next() // consume property keyword
+		switch propName {
+		case "watches":
+			p.expect(TokenColon)
+			sd.Watches = p.parseIdentList()
+			p.skipNewlines()
+		case "model":
+			p.expect(TokenColon)
+			sd.Model = p.expectString()
+			p.skipNewlines()
+		case "system":
+			p.expect(TokenColon)
+			sd.System = p.expectIdent()
+			p.skipNewlines()
+		case "cooldown":
+			p.expect(TokenColon)
+			sd.Cooldown = p.expectString()
+			p.skipNewlines()
+		case "max_evals":
+			p.expect(TokenColon)
+			sd.MaxEvals = p.expectInt()
+			p.skipNewlines()
+		default:
+			p.addError(DiagUnknownProperty, t, "unknown supervisor property '"+propName+"'")
+			p.skipToNewline()
+		}
+	}
+	return sd
 }
 
 // parseCursorsBlock parses a `cursors:` block on an agent or judge.

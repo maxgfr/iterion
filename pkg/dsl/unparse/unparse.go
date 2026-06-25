@@ -26,6 +26,7 @@ func Unparse(f *ast.File) string {
 	w.writePrompts(f.Prompts)
 	w.writeSchemas(f.Schemas)
 	w.writeCursors(f.Cursors)
+	w.writeSupervisors(f.Supervisors)
 	w.writeAgents(f.Agents)
 	w.writeJudges(f.Judges)
 	w.writeRouters(f.Routers)
@@ -164,6 +165,29 @@ func (w *fileWriter) writeCursors(cursors []*ast.CursorDecl) {
 	for _, c := range cursors {
 		w.blankLine()
 		writeCursorDecl(&w.b, c)
+	}
+}
+
+// writeSupervisors renders top-level `supervisor NAME:` declarations.
+func (w *fileWriter) writeSupervisors(supervisors []*ast.SupervisorDecl) {
+	for _, s := range supervisors {
+		w.blankLine()
+		fmt.Fprintf(&w.b, "supervisor %s:\n", s.Name)
+		if len(s.Watches) > 0 {
+			fmt.Fprintf(&w.b, "  watches: [%s]\n", strings.Join(s.Watches, ", "))
+		}
+		if s.Model != "" {
+			fmt.Fprintf(&w.b, "  model: %q\n", s.Model)
+		}
+		if s.System != "" {
+			fmt.Fprintf(&w.b, "  system: %s\n", s.System)
+		}
+		if s.Cooldown != "" {
+			fmt.Fprintf(&w.b, "  cooldown: %q\n", s.Cooldown)
+		}
+		if s.MaxEvals != 0 {
+			fmt.Fprintf(&w.b, "  max_evals: %d\n", s.MaxEvals)
+		}
 	}
 }
 

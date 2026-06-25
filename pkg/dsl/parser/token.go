@@ -160,6 +160,8 @@ const (
 	TokenCursors
 	TokenValues
 	TokenBands
+	// Supervisor declaration (concurrent node-watcher)
+	TokenSupervisor
 	// Terminal node names (reserved identifiers)
 	TokenDone
 	TokenFail
@@ -297,6 +299,7 @@ var tokenNames = map[TokenType]string{
 	TokenDeny:             "deny",
 	TokenSandbox:          "sandbox",
 	TokenCursor:           "cursor",
+	TokenSupervisor:       "supervisor",
 	TokenCursors:          "cursors",
 	TokenValues:           "values",
 	TokenBands:            "bands",
@@ -418,6 +421,7 @@ var keywords = map[string]TokenType{
 	"deny":                  TokenDeny,
 	"sandbox":               TokenSandbox,
 	"cursor":                TokenCursor,
+	"supervisor":            TokenSupervisor,
 	"cursors":               TokenCursors,
 	"values":                TokenValues,
 	"bands":                 TokenBands,

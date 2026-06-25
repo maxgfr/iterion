@@ -396,6 +396,7 @@ func (c *compiler) compile() *Workflow {
 	c.compileSchemas()
 	c.compilePrompts()
 	cursors := c.compileCursors()
+	supervisors := c.compileSupervisors()
 
 	// Cross-kind node-name validation, run BEFORE the per-kind compile
 	// passes that populate c.nodes. The parser already rejects reserved
@@ -491,6 +492,7 @@ func (c *compiler) compile() *Workflow {
 		MCP:             convertMCPConfig(wf.MCP),
 		MCPServers:      c.mcp,
 		Cursors:         cursors,
+		Supervisors:     supervisors,
 		Interaction:     interaction,
 		Worktree:        defaultWorktreeMode(wf.Worktree),
 		RTK:             wf.RTK,
@@ -509,6 +511,10 @@ func (c *compiler) compile() *Workflow {
 
 	// Static validation pass (P2-02).
 	c.validate(w)
+
+	// Supervisor cross-references (watched nodes exist + are agents,
+	// system prompt declared) — after nodes + prompts are on w.
+	c.validateSupervisors(w)
 
 	return w
 }

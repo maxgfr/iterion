@@ -1,0 +1,29 @@
+## Minimal workflow demonstrating an inline `supervisor` declaration.
+## The watchdog supervises the `implement` agent node concurrently and
+## enqueues steering messages it picks up at its next turn — scoped to
+## that node. See docs/supervisors.md.
+
+supervisor watchdog:
+  watches: [implement]
+  model: "anthropic/claude-opus-4-8"
+  system: watchdog_policy
+  cooldown: "30s"
+  max_evals: 15
+
+prompt watchdog_policy:
+  You watch an implementer agent. Stay silent while it makes steady
+  progress. Intervene (one short, actionable message) only if you see it
+  edit files outside src/, repeat a failing Bash command without changing
+  approach, or drift from the stated task. Register a tool_error monitor
+  on Bash so you are woken immediately when a command fails.
+
+prompt task:
+  Implement the requested change with tests.
+
+agent implement:
+  model: "anthropic/claude-opus-4-8"
+  system: task
+
+workflow main:
+  entry: implement
+  implement -> done

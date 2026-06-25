@@ -446,6 +446,31 @@ coverage gates. Reference catalogue:
 [examples/cursors/cursors.iter](examples/cursors/cursors.iter)
 ships `ambition` / `depth` / `rigor` / `autonomy`.
 
+### Supervisors (`supervisor <name>:`)
+
+A **supervisor** is an LLM agent that watches another running agent and
+enqueues steering messages the supervised agent picks up **at its next
+turn** — like a human watching a Claude Code session and typing a
+correction. It is **node-scoped**: it watches one or more *agent nodes*
+(`watches: [implement]`), is armed only while a watched node is active,
+and its injected messages are node-tagged
+(`store.QueuedUserMessage.NodeID` + `WithMessageNode`) so a late message
+can't leak into the next node. It is a top-level **declaration**, not a
+graph node — the engine spawns a concurrent
+[pkg/supervise](pkg/supervise/coordinator.go) `Coordinator` (shaped like
+`watch_coordinator`) at run start and tears it down when the run ends.
+The coordinator wakes the bot on debounced turn boundaries (cooldown) and
+on **monitor** matches (event patterns the bot registers — Bash failure,
+edit to a path, cost threshold); the bot returns a structured `Decision`
+(intervene/message/watch/done) via `GenerateObjectDirect`. Injection
+reuses `runview.Service.QueueMessage`, so steering shows in the studio
+conversation and is delivered by the same inbox-drain hooks as operator
+chat. Two surfaces: the in-`.bot` `supervisor <name>:` block (primary,
+auto-spawned; diagnostics C190–C193) and `iterion supervise --run-id
+--node --system --monitor` (attach to an already-running run). Reference:
+[docs/supervisors.md](docs/supervisors.md),
+[examples/supervisor/sample.bot](examples/supervisor/sample.bot).
+
 ### Ultracode (`reasoning_effort: ultracode`)
 
 `ultracode` is the top of the `reasoning_effort` dial

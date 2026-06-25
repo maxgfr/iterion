@@ -46,6 +46,10 @@ type Workflow struct {
 	// top-level `cursor NAME:` declarations. Agent/judge `cursors:`
 	// invocations are resolved against this map at runtime.
 	Cursors map[string]*CursorDef
+	// Supervisors are top-level `supervisor NAME:` declarations: concurrent
+	// node-watchers the engine spawns at run start (not graph nodes). See
+	// docs/supervisors.md.
+	Supervisors []*Supervisor
 	// MCPServers contains the explicit top-level declarations from the .iter file.
 	MCPServers map[string]*MCPServer
 	// ActiveMCPServers and ResolvedMCPServers are populated after project config
