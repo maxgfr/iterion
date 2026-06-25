@@ -10,17 +10,21 @@ import { Select } from "@/components/ui/Select";
 export interface RunSettingsSectionProps {
   backendOverride: string;
   rtkOverride: string;
+  permissionOverride: string;
   backendReport: BackendDetectReport | null;
   onBackendChange: (value: string) => void;
   onRtkChange: (value: string) => void;
+  onPermissionChange: (value: string) => void;
 }
 
 export default function RunSettingsSection({
   backendOverride,
   rtkOverride,
+  permissionOverride,
   backendReport,
   onBackendChange,
   onRtkChange,
+  onPermissionChange,
 }: RunSettingsSectionProps) {
   return (
     <section className="mt-6 border-t border-border-default pt-4 mb-6">
@@ -89,6 +93,29 @@ export default function RunSettingsSection({
               </a>{" "}
               to save 60–90% of command-output tokens. Needs the{" "}
               <code>rtk</code> binary on the host PATH.
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-[160px_1fr] gap-3 items-start">
+          <div>
+            <div className="text-xs font-medium font-mono">permission</div>
+            <div className="text-caption text-fg-subtle">tool-use gate</div>
+          </div>
+          <div>
+            <Select
+              value={permissionOverride}
+              onChange={(e) => onPermissionChange(e.currentTarget.value)}
+            >
+              <option value="">inherit (workflow / ITERION_PERMISSION)</option>
+              <option value="ask">ask — pause for approval on off-policy tool use</option>
+              <option value="deny">deny — hard-block off-policy tool use (headless)</option>
+              <option value="off">off — no gate (default)</option>
+            </Select>
+            <div className="mt-1 text-caption text-fg-subtle">
+              Anti-prompt-injection gate: tool calls outside the workflow&apos;s{" "}
+              <code>allow:</code> list are paused for your approval (
+              <code>ask</code>) or blocked (<code>deny</code>). Rule lists are
+              set in the <code>.bot</code> DSL. See docs/permissions.md.
             </div>
           </div>
         </div>

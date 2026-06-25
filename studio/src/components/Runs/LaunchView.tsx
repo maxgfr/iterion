@@ -82,6 +82,9 @@ export default function LaunchView() {
   // rtk command-output-compression override for this run ("" inherits the
   // workflow/node `rtk:` DSL then ITERION_RTK).
   const [rtkOverride, setRtkOverride] = useState<string>("");
+  // tool-permission gate mode override ("" inherits the workflow/node
+  // `permission:` DSL then ITERION_PERMISSION).
+  const [permissionOverride, setPermissionOverride] = useState<string>("");
   const backendReport = useBackendDetectStore((s) => s.report);
 
   useEffect(() => {
@@ -288,6 +291,7 @@ export default function LaunchView() {
           Object.keys(attachmentsPayload).length > 0 ? attachmentsPayload : undefined,
         backend: backendOverride || undefined,
         rtk: rtkOverride || undefined,
+        permission: permissionOverride || undefined,
       });
       setLocation(`/runs/${encodeURIComponent(res.run_id)}`);
     } catch (e) {
@@ -411,9 +415,11 @@ export default function LaunchView() {
             <RunSettingsSection
               backendOverride={backendOverride}
               rtkOverride={rtkOverride}
+              permissionOverride={permissionOverride}
               backendReport={backendReport}
               onBackendChange={setBackendOverride}
               onRtkChange={setRtkOverride}
+              onPermissionChange={setPermissionOverride}
             />
             <WorktreeFinalizationSection
               showAdvanced={showAdvanced}

@@ -77,6 +77,11 @@ type LaunchSpec struct {
 	// inherits the workflow/node `rtk:` DSL then ITERION_RTK. Highest
 	// priority input to rtk.Resolve. See docs/rtk.md.
 	RTK string
+	// Permission is the run-level tool-permission-gate mode override
+	// ("", "off", "ask", "deny") from the studio Launch toggle. ""
+	// inherits the workflow/node `permission:` DSL then
+	// ITERION_PERMISSION. See docs/permissions.md.
+	Permission string
 	// ParentRunID, ShardIndex, ShardCount, ShardLabel are set when a
 	// parent run dispatches this as a shard child (see Cap. 3 in
 	// docs/security-bots-distributed.md). The cloudpublisher copies

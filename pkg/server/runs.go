@@ -130,6 +130,10 @@ type launchRunRequest struct {
 	// ("on"|"ultra"|"off"). Empty inherits the workflow/node rtk: DSL
 	// then ITERION_RTK. See runview.LaunchSpec.RTK.
 	RTK string `json:"rtk,omitempty"`
+	// Permission is the run-level tool-permission-gate mode override
+	// ("off"|"ask"|"deny"). Empty inherits the workflow/node permission:
+	// DSL then ITERION_PERMISSION. See docs/permissions.md.
+	Permission string `json:"permission,omitempty"`
 	// Cap. 3 sharding fields. When ParentRunID is non-empty, this
 	// launch is a shard child of an existing parent run; the server
 	// propagates the fields to the persisted Run document and (in
@@ -295,6 +299,7 @@ func (s *Server) handleLaunchRun(w http.ResponseWriter, r *http.Request) {
 		AttachmentPromote:  promote,
 		Backend:            req.Backend,
 		RTK:                req.RTK,
+		Permission:         req.Permission,
 		ParentRunID:        req.ParentRunID,
 		ShardIndex:         req.ShardIndex,
 		ShardCount:         req.ShardCount,

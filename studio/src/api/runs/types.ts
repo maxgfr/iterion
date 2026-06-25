@@ -399,6 +399,11 @@ export interface CreateRunRequest {
   // Empty inherits the workflow/node `rtk:` DSL then ITERION_RTK.
   // Rewrites agent shell commands to their compact `rtk <cmd>` form.
   rtk?: string;
+  // tool-permission gate mode ("off" | "ask" | "deny"). Empty inherits
+  // the workflow/node `permission:` DSL then ITERION_PERMISSION. "ask"
+  // pauses for human approval on any tool not allow-listed; "deny" hard-
+  // blocks it. See docs/permissions.md.
+  permission?: string;
 }
 
 export interface CreateRunResponse {
