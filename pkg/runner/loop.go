@@ -1169,6 +1169,7 @@ func (r *Runner) prepareRepoWorkspace(ctx context.Context, msg *queue.RunMessage
 	// via ITERION_GIT_AUTHOR_NAME / ITERION_GIT_AUTHOR_EMAIL.
 	_ = r.runGit(ctx, dir, "", "config", "user.name", gitAuthorName())
 	_ = r.runGit(ctx, dir, "", "config", "user.email", gitAuthorEmail())
+	seedRunScratchIgnore(dir)
 	r.cfg.Logger.Info("runner: cloned %s@%s for run %s", msg.RepoURL, msg.RepoSHA, msg.RunID)
 	return dir, nil
 }
@@ -1188,6 +1189,22 @@ func gitAuthorEmail() string {
 		return v
 	}
 	return "iterion@users.noreply.github.com"
+}
+
+// seedRunScratchIgnore locally excludes iterion's per-run scratch — the
+// .claude/ dir (mirrored skills + claude_code's plan.md) — from the cloned
+// repo, so a bot's `git add -A` (which stages new files so the reviewers'
+// `git diff HEAD` can see them) doesn't drag that scratch into the review
+// diff. Writes .git/info/exclude (local, never committed or pushed);
+// best-effort, so a read-only or unusual .git layout simply no-ops.
+func seedRunScratchIgnore(dir string) {
+	p := filepath.Join(dir, ".git", "info", "exclude")
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString("\n# iterion per-run scratch (mirrored skills + plan) — not part of the change\n.claude/\n")
 }
 
 // validateRepoTarget gates the webhook-sourced clone URL and ref before

@@ -63,15 +63,18 @@ with `skipped_reason="no origin remote to push to"`.
 ## 2. Authenticate from the mounted forge_token
 
 This run may be unattended (a comment-triggered launch) with no
-pre-authenticated forge CLI. If the mounted secret file
-`/run/iterion/secrets/forge_token` EXISTS, authenticate the matching CLI
-with it FIRST — unconditionally, even if the CLI already reports
-authenticated (a reused runner pod can carry a PREVIOUS run's login).
-Pass the path/value to the CLI; never read the token into a prompt or
-echo it:
+pre-authenticated forge CLI, and a reused runner pod can carry a PREVIOUS
+run's login. The most robust path is **environment auth**: gh/glab read a
+token straight from the env, which overrides any stale login and avoids the
+`auth login` / `set-token` sub-commands whose flags drift between CLI
+versions (glab's `--host` → `--hostname` rename has bitten real runs). If
+the mounted secret file `/run/iterion/secrets/forge_token` EXISTS, export it
+for the matching CLI FIRST; never read the token into a prompt or echo it:
 
-- GitHub: `gh auth login --with-token < /run/iterion/secrets/forge_token`
-- GitLab: `glab auth login --hostname <host> --stdin < /run/iterion/secrets/forge_token`
+- GitHub: `export GH_TOKEN="$(cat /run/iterion/secrets/forge_token)"`
+- GitLab: `export GITLAB_TOKEN="$(cat /run/iterion/secrets/forge_token)"` plus
+  `export GITLAB_HOST="<host>"` (host parsed from the origin URL); glab reads
+  both — do NOT run `glab auth login` / `set-token`.
 - Forgejo/Gitea: `export FORGEJO_TOKEN="$(cat /run/iterion/secrets/forge_token)"`
 
 When the file is absent (manual/local runs), assume host auth and verify
