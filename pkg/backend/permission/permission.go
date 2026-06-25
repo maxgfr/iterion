@@ -20,6 +20,7 @@
 package permission
 
 import (
+	"cmp"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -104,10 +105,11 @@ func (d Decision) String() string {
 // Policy is a resolved permission policy: a mode plus three ordered
 // rule lists. The zero value (ModeOff, no rules) is a disabled gate.
 type Policy struct {
-	Mode  Mode
-	allow []rule
-	ask   []rule
-	deny  []rule
+	Mode   Mode
+	allow  []rule
+	ask    []rule
+	deny   []rule
+	scoped bool // any rule has an (arg) pattern → Evaluate must summarize
 }
 
 // NewPolicy parses the rule strings into a Policy. A malformed rule is
@@ -129,6 +131,9 @@ func NewPolicy(mode Mode, allow, ask, deny []string) (*Policy, error) {
 			r, err := parseRule(raw)
 			if err != nil {
 				return nil, fmt.Errorf("%s rule %q: %w", group.name, raw, err)
+			}
+			if r.argRe != nil {
+				p.scoped = true
 			}
 			*group.dst = append(*group.dst, r)
 		}
@@ -166,6 +171,9 @@ func ruleStrings(rs []rule) []string {
 // user free-text, so this is defensive only).
 func (p *Policy) AddAllowRule(raw string) {
 	if r, err := parseRule(raw); err == nil {
+		if r.argRe != nil {
+			p.scoped = true
+		}
 		p.allow = append(p.allow, r)
 	}
 }
@@ -193,14 +201,21 @@ func (p *Policy) Evaluate(toolName string, input map[string]any) (Decision, stri
 	if IsInfrastructureTool(toolName) {
 		return Allow, ""
 	}
-	summary := summarize(toolName, input)
-	if r, ok := matchAny(p.deny, toolName, summary); ok {
+	canon := canonicalToolName(toolName)
+	// summarize is only needed by scoped (arg-pattern) rules; skip the
+	// work entirely when every rule is a bare tool name (the common
+	// `deny: [Bash]` / `allow: [*]` shapes).
+	summary := ""
+	if p.scoped {
+		summary = summarize(canon, input)
+	}
+	if r, ok := matchAny(p.deny, toolName, canon, summary); ok {
 		return Deny, r.raw
 	}
-	if r, ok := matchAny(p.ask, toolName, summary); ok {
+	if r, ok := matchAny(p.ask, toolName, canon, summary); ok {
 		return Ask, r.raw
 	}
-	if r, ok := matchAny(p.allow, toolName, summary); ok {
+	if r, ok := matchAny(p.allow, toolName, canon, summary); ok {
 		return Allow, r.raw
 	}
 	switch p.Mode {
@@ -211,24 +226,15 @@ func (p *Policy) Evaluate(toolName string, input map[string]any) (Decision, stri
 	}
 }
 
-// rule is a parsed permission entry.
+// rule is a parsed permission entry: a tool matcher plus an optional
+// argument matcher. A nil argRe is a bare tool rule (matches any
+// invocation of the tool).
 type rule struct {
-	raw     string         // original text, for messages + forwarding
-	tool    string         // canonical tool key, or "*" / "mcp__srv__*" glob
-	toolRe  *regexp.Regexp // non-nil when the tool name itself is a glob
-	hasArg  bool           // true when the rule scoped an (arg) pattern
-	argKind argMatchKind   // how to match the argument
-	argLit  string         // literal for exact/prefix
-	argRe   *regexp.Regexp // compiled regex for wildcard matches
+	raw    string         // original text, for messages + forwarding
+	tool   string         // canonical tool key, or "*" (any) — literal case
+	toolRe *regexp.Regexp // non-nil when the tool name itself is a glob
+	argRe  *regexp.Regexp // non-nil when the rule scoped an (arg) pattern
 }
-
-type argMatchKind int
-
-const (
-	argExact  argMatchKind = iota // summary == literal
-	argPrefix                     // summary startswith literal (the `:*` idiom)
-	argRegex                      // summary matches argRe (contains `*`/`**`)
-)
 
 // parseRule parses `Tool` or `Tool(content)` into a rule.
 func parseRule(raw string) (rule, error) {
@@ -245,9 +251,11 @@ func parseRule(raw string) (rule, error) {
 			return rule{}, fmt.Errorf("missing closing ')'")
 		}
 		toolPart = s[:open]
-		content := s[open+1 : len(s)-1]
-		r.hasArg = true
-		r.argKind, r.argLit, r.argRe = compileArg(content)
+		argRe, err := compileArg(s[open+1 : len(s)-1])
+		if err != nil {
+			return rule{}, fmt.Errorf("bad arg pattern: %w", err)
+		}
+		r.argRe = argRe
 	}
 	toolPart = strings.TrimSpace(toolPart)
 	if toolPart == "" {
@@ -269,36 +277,39 @@ func parseRule(raw string) (rule, error) {
 	return r, nil
 }
 
-// compileArg classifies the `(content)` part of a rule.
-func compileArg(content string) (argMatchKind, string, *regexp.Regexp) {
+// compileArg compiles the `(content)` part of a rule into one anchored
+// matcher: a trailing `:*` is the Bash prefix idiom (`git diff:*` matches
+// `git diff` and any longer command), `*`/`**` are greedy wildcards, and
+// a bare literal is an exact match.
+func compileArg(content string) (*regexp.Regexp, error) {
 	c := strings.TrimSpace(content)
-	// The Bash prefix idiom: `git diff:*` matches `git diff` and any
-	// longer command. We also accept a bare trailing `*` as a prefix
-	// when it is the only wildcard.
-	if strings.HasSuffix(c, ":*") {
-		return argPrefix, strings.TrimSuffix(c, ":*"), nil
+	switch {
+	case strings.HasSuffix(c, ":*"):
+		return regexp.Compile("^" + regexp.QuoteMeta(strings.TrimSuffix(c, ":*")))
+	case strings.Contains(c, "*"):
+		return globToRegexp(c)
+	default:
+		return regexp.Compile("^" + regexp.QuoteMeta(c) + "$")
 	}
-	if strings.Contains(c, "*") {
-		re, err := globToRegexp(c)
-		if err == nil {
-			return argRegex, c, re
-		}
-	}
-	return argExact, c, nil
 }
 
-// matchAny returns the first rule in rs that matches (tool, summary).
-func matchAny(rs []rule, toolName, summary string) (rule, bool) {
-	canon := canonicalToolName(toolName)
+// matchAny returns the first rule in rs that matches the tool (by its raw
+// name + canonical key) and, for scoped rules, the input summary.
+func matchAny(rs []rule, rawName, canon, summary string) (rule, bool) {
 	for _, r := range rs {
-		if !r.matchesTool(toolName, canon) {
+		if !r.matchesTool(rawName, canon) {
 			continue
 		}
-		if !r.hasArg {
+		if r.argRe == nil {
 			return r, true // bare tool rule matches any invocation
 		}
-		if r.matchesArg(summary) {
-			return r, true
+		// summarize may emit several candidate strings (one per line) —
+		// e.g. WebFetch yields "domain:<host>", "<host>" and the full URL
+		// — and a scoped rule matches if it matches ANY candidate.
+		for _, cand := range strings.Split(summary, "\n") {
+			if r.argRe.MatchString(cand) {
+				return r, true
+			}
 		}
 	}
 	return rule{}, false
@@ -316,60 +327,35 @@ func (r rule) matchesTool(rawName, canon string) bool {
 	return r.tool == canon
 }
 
-func (r rule) matchesArg(summary string) bool {
-	// summarize may emit several candidate strings (one per line) — e.g.
-	// WebFetch yields "domain:<host>", "<host>" and the full URL — and a
-	// scoped rule matches if it matches ANY candidate.
-	for _, cand := range strings.Split(summary, "\n") {
-		switch r.argKind {
-		case argPrefix:
-			if strings.HasPrefix(cand, r.argLit) {
-				return true
-			}
-		case argRegex:
-			if r.argRe != nil && r.argRe.MatchString(cand) {
-				return true
-			}
-		default: // argExact
-			if cand == r.argLit {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // globToRegexp converts a `*`/`**` glob to an anchored regexp. Both `*`
 // and `**` translate to `.*` (greedy) — a faithful, predictable
 // superset of Claude Code's segment-aware globbing that covers the
 // common rule shapes (`pkg/**`, `*.go`, `mcp__srv__get_*`). Documented
 // in docs/permissions.md.
 func globToRegexp(glob string) (*regexp.Regexp, error) {
-	var b strings.Builder
-	b.WriteString("^")
-	for _, part := range strings.Split(glob, "*") {
-		b.WriteString(regexp.QuoteMeta(part))
-		b.WriteString(".*")
+	parts := strings.Split(glob, "*")
+	for i, part := range parts {
+		parts[i] = regexp.QuoteMeta(part)
 	}
-	// The split adds one trailing ".*" too many; trim it.
-	pattern := strings.TrimSuffix(b.String(), ".*")
-	pattern += "$"
-	return regexp.Compile(pattern)
+	return regexp.Compile("^" + strings.Join(parts, ".*") + "$")
 }
 
 // summarize renders a tool's input into the string(s) that scoped rule
 // patterns match against, mirroring Claude Code's per-tool summaries
 // (Bash → command, Read/Edit/Write → path, WebFetch → domain + url).
 // Multiple candidates are joined with '\n' so a rule pattern matches if
-// it matches ANY candidate (e.g. WebFetch by domain OR full url).
-func summarize(toolName string, input map[string]any) string {
-	switch canonicalToolName(toolName) {
+// it matches ANY candidate (e.g. WebFetch by domain OR full url). canon
+// is the already-canonicalised tool name. The per-tool argument keys
+// mirror tooldisplay's header-detail extraction; keep the two in sync
+// when adding a tool.
+func summarize(canon string, input map[string]any) string {
+	switch canon {
 	case "bash":
 		return str(input, "command")
 	case "read", "write", "edit", "notebookedit":
-		return firstNonEmpty(str(input, "file_path"), str(input, "path"), str(input, "notebook_path"))
+		return cmp.Or(str(input, "file_path"), str(input, "path"), str(input, "notebook_path"))
 	case "glob", "grep":
-		return firstNonEmpty(str(input, "pattern"), str(input, "path"))
+		return cmp.Or(str(input, "pattern"), str(input, "path"))
 	case "webfetch":
 		u := str(input, "url")
 		host := ""
@@ -406,15 +392,6 @@ func str(m map[string]any, key string) string {
 	if v, ok := m[key]; ok {
 		if s, ok := v.(string); ok {
 			return s
-		}
-	}
-	return ""
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
 		}
 	}
 	return ""

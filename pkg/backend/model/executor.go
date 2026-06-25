@@ -1,6 +1,7 @@
 package model
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -1037,28 +1038,18 @@ func extractBackendFields(node ir.Node) (backendFields, error) {
 // rule or unknown mode is an error (surfaced as a node execution error;
 // compile-time validation already flags these via C110/C111).
 func (e *ClawExecutor) resolvePermissionPolicy(nodeMode string) (*permission.Policy, error) {
-	modeStr := firstNonEmptyStr(e.permOverride, nodeMode, e.wfPermission, e.permEnvDefault)
-	mode, err := permission.ParseMode(modeStr)
+	mode, err := permission.ParseMode(cmp.Or(e.permOverride, nodeMode, e.wfPermission, e.permEnvDefault))
 	if err != nil {
 		return nil, err
 	}
 	if mode == permission.ModeOff {
 		return &permission.Policy{}, nil
 	}
-	allow := append(append([]string(nil), e.wfPermAllow...), e.permAllowRules...)
-	ask := append(append([]string(nil), e.wfPermAsk...), e.permAskRules...)
-	deny := append(append([]string(nil), e.wfPermDeny...), e.permDenyRules...)
-	return permission.NewPolicy(mode, allow, ask, deny)
-}
-
-// firstNonEmptyStr returns the first non-empty string argument.
-func firstNonEmptyStr(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
+	return permission.NewPolicy(mode,
+		slices.Concat(e.wfPermAllow, e.permAllowRules),
+		slices.Concat(e.wfPermAsk, e.permAskRules),
+		slices.Concat(e.wfPermDeny, e.permDenyRules),
+	)
 }
 
 // stampDelegateOutputMeta writes per-call observability keys onto the

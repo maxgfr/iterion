@@ -68,20 +68,25 @@ func ParseAnswer(s string) (allow bool, always bool) {
 // GrantRuleFor builds an allow-rule string that authorizes a granted
 // call. "always" scopes the rule to the whole tool (bare name); "once"
 // scopes it to the specific argument so only the identical retry passes.
+// The agent-issued tool spelling is kept verbatim (it round-trips through
+// canonicalToolName on the next Evaluate); an empty name degrades to "*".
 func GrantRuleFor(toolName string, input map[string]any, always bool) string {
-	if always {
-		return canonicalRuleToolName(toolName)
+	name := toolName
+	if strings.TrimSpace(name) == "" {
+		name = "*"
 	}
-	if arg := briefArg(toolName, input); arg != "" {
-		return fmt.Sprintf("%s(%s)", canonicalRuleToolName(toolName), arg)
+	if !always {
+		if arg := briefArg(toolName, input); arg != "" {
+			return fmt.Sprintf("%s(%s)", name, arg)
+		}
 	}
-	return canonicalRuleToolName(toolName)
+	return name
 }
 
 // briefArg renders the most identifying argument of a tool call for
 // human/model messages (the command, path, url, …).
 func briefArg(toolName string, input map[string]any) string {
-	s := summarize(toolName, input)
+	s := summarize(canonicalToolName(toolName), input)
 	// summarize may join several candidates with '\n'; show the first.
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
@@ -91,14 +96,4 @@ func briefArg(toolName string, input map[string]any) string {
 		s = s[:max] + "…"
 	}
 	return s
-}
-
-// canonicalRuleToolName returns the tool name to use when synthesizing a
-// grant rule. We keep the agent-issued spelling (it round-trips through
-// canonicalToolName on the next Evaluate), defaulting to the raw name.
-func canonicalRuleToolName(toolName string) string {
-	if strings.TrimSpace(toolName) == "" {
-		return "*"
-	}
-	return toolName
 }

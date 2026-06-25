@@ -59,8 +59,9 @@ Where:
 - `Grep` (bare) — any grep; `mcp__github__get_*` — any github MCP `get_` tool.
 - `Bash(rm -rf:*)` in `deny:` — never `rm -rf`, even in `ask` mode.
 
-A per-node override is the scalar mode only: `permission: deny` on an
-`agent`/`judge`/`tool` node.
+A per-node override is the scalar mode only — `permission: deny` on an
+`agent` or `judge` node (the gate evaluates *LLM-issued* tool calls; a
+`tool` node's `permission:` is parsed but currently inert — see Status).
 
 Matching semantics (`pkg/backend/permission`):
 
