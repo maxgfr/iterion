@@ -570,6 +570,7 @@ func executeToolsDirect(
 				return results, &delegate.ErrAskUser{
 					Question:         permission.AskPrompt(tu.Name, hookInput, rule),
 					PendingToolUseID: tu.ID,
+					PermissionMarker: permission.Marker(tu.Name, hookInput, rule),
 				}
 			}
 			// permission.Allow falls through to execution.

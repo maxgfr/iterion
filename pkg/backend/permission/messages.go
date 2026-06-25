@@ -26,9 +26,13 @@ func DenyMessage(toolName string, input map[string]any, rule string) string {
 // approval (ModeAsk, off-policy). The operator answers with one of the
 // AnswerAllowOnce / AnswerAllowAlways / AnswerDeny tokens (the studio
 // renders these as buttons). Identical wording on both backends.
+// AskPromptPrefix is the stable leading text of every AskPrompt, used to
+// recognise a permission approval prompt relayed back on resume.
+const AskPromptPrefix = "🔐 Permission requested:"
+
 func AskPrompt(toolName string, input map[string]any, rule string) string {
 	b := &strings.Builder{}
-	fmt.Fprintf(b, "🔐 Permission requested: the agent wants to use the `%s` tool", toolName)
+	fmt.Fprintf(b, "%s the agent wants to use the `%s` tool", AskPromptPrefix, toolName)
 	if arg := briefArg(toolName, input); arg != "" {
 		fmt.Fprintf(b, ":\n\n    %s\n", arg)
 	} else {

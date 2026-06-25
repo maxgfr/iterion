@@ -133,19 +133,18 @@ identically whichever backend executes it.
   anti-injection boundary for headless and cloud runs.
 - **`ask` mode** pauses the run (`paused_waiting_human`) and surfaces the
   off-policy call to the operator, so nothing off-policy ever executes
-  silently. To resolve the pause, the operator answers the approval
-  question:
-  - **claw** — the answer is interpreted directly: `allow` / `allow
-    always` records a grant and the agent's re-issued call executes
-    (`allow always` keeps it allowed for the rest of the run segment);
-    `deny` refuses it and the agent adapts. No rule typing needed.
-  - **claude_code** — resume with the matching `--permission-allow`
-    rule (e.g. `iterion resume … --permission-allow 'Bash(go build:*)'`);
-    the CLI session re-issues the now-authorized call. (The studio can
-    offer this as a one-click button computed from the paused call.)
-- Studio surfaces the paused approval request through the existing
-  human-input UI; dedicated allow/deny buttons + a Launch-modal mode
-  toggle are the remaining polish.
+  silently. To resolve the pause, the operator just **answers the
+  approval question** with `allow`, `allow always`, or `deny` — on
+  **both backends**. The pause carries a structured marker (tool + input
+  + rule); the runtime maps the answer to a grant rule
+  (`allow` = argument-scoped, `allow always` = whole-tool) and feeds it
+  back into the resolved policy, so the agent's re-issued call passes the
+  gate and executes (claw rehydrates its tool loop; claude_code re-issues
+  in the resumed CLI session via a `[PERMISSION GRANTED]` instruction).
+  `deny` refuses the call and the agent adapts. The `--permission-allow`
+  flags on `resume` remain available for scripted/headless approval.
+- The marker also lets a `permission: ask` node pause **without** needing
+  `interaction:` set — the gate is its own reason to pause.
 - **Scope:** the gate evaluates the **tool calls an agent/judge LLM
   makes**. A `tool` node (a direct, deterministic shell command, no LLM)
   is the action itself and is governed by the **Verified Action** quad

@@ -406,13 +406,17 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	// still works (and is the only path when sandboxed).
 	streamCtx, cancelStream := context.WithCancel(ctx)
 	defer cancelStream()
-	var pendingQuestion atomic.Value // string
+	var pendingQuestion atomic.Value   // string
+	var pendingPermission atomic.Value // map[string]any (permission marker)
 	opts = b.wireAskUserHook(task, opts, &extraAllowedTools, &pendingQuestion, cancelStream)
 
 	// Tool-permission gate (anti-prompt-injection boundary). Shares the
 	// pendingQuestion/cancelStream pause path with ask_user so an Ask
-	// decision surfaces to the human exactly like a clarifying question.
-	opts = b.wirePermissionHook(task, opts, &pendingQuestion, cancelStream)
+	// decision surfaces to the human exactly like a clarifying question;
+	// pendingPermission additionally carries the structured marker so the
+	// pause becomes an approval card and the runtime can auto-grant on
+	// resume.
+	opts = b.wirePermissionHook(task, opts, &pendingQuestion, &pendingPermission, cancelStream)
 
 	// Secret materialisation, rtk command compression, and board MCP wiring —
 	// each a self-contained set of opts hooks/servers (see helpers). Board
@@ -458,7 +462,8 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	// fired, the resulting context cancellation surfaces here as ctx.Err(),
 	// which we must not treat as a failure.
 	if q, ok := pendingQuestion.Load().(string); ok && q != "" {
-		return b.buildAskUserPendingResult(task, q, rm, sessMeta, currentFingerprint, duration, stderrBuf.String()), nil
+		marker, _ := pendingPermission.Load().(map[string]any)
+		return b.buildAskUserPendingResult(task, q, marker, rm, sessMeta, currentFingerprint, duration, stderrBuf.String()), nil
 	}
 
 	if streamErr != nil {
@@ -536,18 +541,24 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 // readability; the per-field semantics (Duration, ExitCode=0, Stderr,
 // SessionID-from-rm, SessionFingerprint) are identical to the original
 // inline path.
-func (b *ClaudeCodeBackend) buildAskUserPendingResult(task Task, q string, rm *claudesdk.ResultMessage, sessMeta sessionMeta, currentFingerprint string, duration time.Duration, stderr string) Result {
-	b.Logger.Info("[%s#%d/claude-code] 🛑 ask_user escalated via native MCP tool", task.NodeID, task.Iteration)
+func (b *ClaudeCodeBackend) buildAskUserPendingResult(task Task, q string, marker map[string]any, rm *claudesdk.ResultMessage, sessMeta sessionMeta, currentFingerprint string, duration time.Duration, stderr string) Result {
+	if marker != nil {
+		b.Logger.Info("[%s#%d/claude-code] 🔐 tool-permission approval escalated to the runtime", task.NodeID, task.Iteration)
+	} else {
+		b.Logger.Info("[%s#%d/claude-code] 🛑 ask_user escalated via native MCP tool", task.NodeID, task.Iteration)
+	}
 	sessID := ""
 	if rm != nil {
 		sessID = rm.SessionID
 	}
+	questions := map[string]interface{}{AskUserQuestionKey: q}
+	if marker != nil {
+		questions[permission.InteractionMarkerKey] = marker
+	}
 	askResult := Result{
 		Output: map[string]interface{}{
-			"_needs_interaction": true,
-			"_interaction_questions": map[string]interface{}{
-				AskUserQuestionKey: q,
-			},
+			"_needs_interaction":     true,
+			"_interaction_questions": questions,
 		},
 		Duration:           duration,
 		ExitCode:           0,
@@ -787,7 +798,7 @@ func (b *ClaudeCodeBackend) wireAskUserHook(task Task, opts []claudesdk.Option, 
 // Infrastructure tools (ask_user, board.*) are exempt inside
 // permission.Policy.Evaluate, so this hook never blocks iterion's own
 // interaction plumbing.
-func (b *ClaudeCodeBackend) wirePermissionHook(task Task, opts []claudesdk.Option, pendingQuestion *atomic.Value, cancelStream context.CancelFunc) []claudesdk.Option {
+func (b *ClaudeCodeBackend) wirePermissionHook(task Task, opts []claudesdk.Option, pendingQuestion, pendingPermission *atomic.Value, cancelStream context.CancelFunc) []claudesdk.Option {
 	policy := task.Permission
 	if !policy.Enabled() {
 		return opts
@@ -805,8 +816,10 @@ func (b *ClaudeCodeBackend) wirePermissionHook(task Task, opts []claudesdk.Optio
 			case permission.Ask:
 				// Surface the approval request to the human and stop the
 				// stream — the post-session check reuses the ask_user
-				// pending path to pause the run.
+				// pending path to pause the run. The marker carries the
+				// structured request so the runtime can auto-grant on resume.
 				pendingQuestion.Store(permission.AskPrompt(in.ToolName, in.ToolInput, rule))
+				pendingPermission.Store(permission.Marker(in.ToolName, in.ToolInput, rule))
 				cancelStream()
 				return claudesdk.HookOutput{
 					Decision:      "deny",

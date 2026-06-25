@@ -341,15 +341,14 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 		// Permission-gate resume: when the pending tool_use is a real
 		// action the gate paused on (not the ask_user infra tool), the
 		// operator's answer is an authorization decision, not a question
-		// answer. Approve → record the grant (so the agent's re-issued
-		// call passes the gate) and instruct it to re-run; deny → refuse.
-		// This reuses the normal tool loop (executeToolsDirect runs the
-		// re-issued call with full hooks/secret-materialisation), so no
-		// out-of-band execution path is needed.
-		if name, input, ok := findPendingToolUse(prior, task.ResumePendingToolUseID); ok &&
+		// answer. The grant itself is applied to task.Permission by the
+		// executor (from the runtime's GrantInputKey); here we just replace
+		// the tool_result with the right instruction so the agent re-issues
+		// the now-authorized call (which then runs through the normal tool
+		// loop) or adapts on denial.
+		if name, _, ok := findPendingToolUse(prior, task.ResumePendingToolUseID); ok &&
 			!permission.IsInfrastructureTool(name) && task.Permission.Enabled() {
-			if allow, always := permission.ParseAnswer(task.ResumeAnswer); allow {
-				task.Permission.AddAllowRule(permission.GrantRuleFor(name, input, always))
+			if allow, _ := permission.ParseAnswer(task.ResumeAnswer); allow {
 				resultText = "✅ The operator approved this action. Re-issue the exact same tool call now to perform it."
 			} else {
 				resultText = "⛔ The operator denied this action. Do not retry it; take a different approach or explain why it is needed."
@@ -504,12 +503,16 @@ func askUserResult(err error) (delegate.Result, bool) {
 	if !errors.As(err, &ask) {
 		return delegate.Result{}, false
 	}
+	questions := map[string]interface{}{
+		delegate.AskUserQuestionKey: ask.Question,
+	}
+	if ask.PermissionMarker != nil {
+		questions[permission.InteractionMarkerKey] = ask.PermissionMarker
+	}
 	return delegate.Result{
 		Output: map[string]interface{}{
-			"_needs_interaction": true,
-			"_interaction_questions": map[string]interface{}{
-				delegate.AskUserQuestionKey: ask.Question,
-			},
+			"_needs_interaction":     true,
+			"_interaction_questions": questions,
 		},
 		BackendName:         delegate.BackendClaw,
 		PendingConversation: ask.Conversation,

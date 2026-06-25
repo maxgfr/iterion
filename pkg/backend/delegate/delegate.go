@@ -692,6 +692,13 @@ type ErrAskUser struct {
 	Question         string
 	PendingToolUseID string
 	Conversation     json.RawMessage
+
+	// PermissionMarker is set (non-nil) when this suspension is a
+	// tool-permission gate pause rather than an LLM ask_user call. It
+	// carries the structured request (tool, input, rule) so the pause
+	// surfaces as an approval card and the runtime can compute the grant
+	// on resume. See pkg/backend/permission.Marker.
+	PermissionMarker map[string]any
 }
 
 func (e *ErrAskUser) Error() string {

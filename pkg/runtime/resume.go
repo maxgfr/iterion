@@ -13,6 +13,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/backend/model"
+	"github.com/SocialGouv/iterion/pkg/backend/permission"
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 	"github.com/SocialGouv/iterion/pkg/store"
 )
@@ -1038,6 +1039,20 @@ func (e *Engine) reInvokeBackend(ctx context.Context, rs *runState, nodeID strin
 		nodeInput[delegate.PriorAskUserQuestionKey] = q
 		if a, ok := answers[delegate.AskUserQuestionKey]; ok {
 			nodeInput[delegate.PriorAskUserAnswerKey] = a
+		}
+	}
+
+	// Tool-permission approval: when the pause carried a permission marker,
+	// the operator's answer is an authorization decision. Compute the grant
+	// rule here (backend-agnostic) and pass it via GrantInputKey so the
+	// executor adds it to the resolved policy — the agent's re-issued call
+	// then passes the gate on both backends.
+	if marker, ok := ni.Questions[permission.InteractionMarkerKey]; ok {
+		if tool, input, _, ok := permission.ParseMarker(marker); ok {
+			answer, _ := answers[delegate.AskUserQuestionKey].(string)
+			if rule, approved := permission.GrantFromAnswer(answer, tool, input); approved {
+				nodeInput[permission.GrantInputKey] = rule
+			}
 		}
 	}
 

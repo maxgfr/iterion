@@ -1198,9 +1198,15 @@ func (e *ClawExecutor) executeBackend(ctx context.Context, node ir.Node, input m
 	// "No tool output found"). Short-circuit here so ask_user pauses
 	// cleanly on schema+tools nodes (e.g. claw + openai/forfait). See
 	// docs/bot-runs/evolve.md.
-	if f.interaction != ir.InteractionNone {
-		if needsInteraction, ok := result.Output["_needs_interaction"].(bool); ok && needsInteraction {
-			questions, _ := result.Output["_interaction_questions"].(map[string]interface{})
+	// A permission-gate `ask` pause also surfaces as `_needs_interaction`,
+	// but the node need not have opted into `interaction:` — the gate is
+	// its own reason to pause. Recognise it by the permission marker so
+	// such a pause converts cleanly here too.
+	needsInteraction, _ := result.Output["_needs_interaction"].(bool)
+	questions, _ := result.Output["_interaction_questions"].(map[string]interface{})
+	_, isPermissionPause := questions[permission.InteractionMarkerKey]
+	if needsInteraction && (f.interaction != ir.InteractionNone || isPermissionPause) {
+		{
 			if questions == nil {
 				questions = map[string]interface{}{"input": "The backend needs your input to continue."}
 			}
@@ -1399,6 +1405,12 @@ func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFie
 	if pol, perr := e.resolvePermissionPolicy(f.permission); perr != nil {
 		return delegate.Task{}, fmt.Errorf("model: node %q: %w", f.id, perr)
 	} else if pol.Enabled() {
+		// On resume after a permission `ask` pause, the runtime computed
+		// the operator's grant rule and passed it via GrantInputKey; add it
+		// so the agent's re-issued call passes the gate.
+		if grant, ok := input[permission.GrantInputKey].(string); ok && grant != "" {
+			pol.AddAllowRule(grant)
+		}
 		task.Permission = pol
 	}
 	e.applyMemorySpec(&task, f.memory)
@@ -2879,7 +2891,23 @@ func prependPriorAskUser(userText string, input map[string]interface{}) string {
 		return userText
 	}
 	a, _ := input[delegate.PriorAskUserAnswerKey].(string)
+	// A permission `ask` pause (claude_code) is not an ask_user call: the
+	// model tried a tool, the gate suspended it, and the operator
+	// authorized (GrantInputKey set) or denied it. Frame the resume so the
+	// model re-issues the now-authorized call (or adapts on denial).
+	if grant, ok := input[permission.GrantInputKey].(string); ok && grant != "" {
+		return fmt.Sprintf("[PERMISSION GRANTED]\nThe operator approved your previous tool call (%s). It is now authorized — re-issue the exact same tool call now to perform it.\n\n%s", q, userText)
+	}
+	if isPermissionPrompt(q) {
+		return fmt.Sprintf("[PERMISSION DENIED]\nThe operator denied your previous tool call (%s). Do not retry it; take a different approach or explain why it is needed.\n\n%s", q, userText)
+	}
 	return fmt.Sprintf("[PRIOR INTERACTION]\nYou previously called ask_user with question: %q\nThe user answered: %q\nUse this answer to complete your task. Do NOT call ask_user with the same question again.\n\n%s", q, a, userText)
+}
+
+// isPermissionPrompt reports whether a relayed prior question is a
+// permission-gate approval prompt (vs an ask_user clarifying question).
+func isPermissionPrompt(q string) bool {
+	return strings.HasPrefix(q, permission.AskPromptPrefix)
 }
 
 // redactJSONTextField returns a sanitized copy of a JSON object
