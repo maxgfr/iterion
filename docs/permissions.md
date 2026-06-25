@@ -42,19 +42,25 @@ Set on the `workflow` block, per node, the CLI, or the environment.
 Rules use Claude Code's syntax — a bare tool name matches any use, or a
 scoped `Tool(pattern)` matches an argument:
 
+Rule lists use iterion's inline-array syntax (like `capabilities:`):
+
 ```
-permission: ask
-allow:
-  - "Read(**)"            # read anything
-  - "Edit(pkg/**)"        # edit only under pkg/
-  - "Bash(go test:*)"     # any `go test …` command (`:*` = prefix match)
-  - "Grep"                # any grep
-  - "mcp__github__get_*"  # any github MCP get_ tool
-deny:
-  - "Bash(rm -rf:*)"      # never rm -rf, even in ask mode
-  - "Read(.env*)"         # never read dotenv files
-  - "WebFetch(domain:evil.example)"
+workflow main:
+  permission: ask
+  allow: ["Read(**)", "Edit(pkg/**)", "Bash(go test:*)", "Grep", "mcp__github__get_*"]
+  ask:   ["Bash(git push:*)"]
+  deny:  ["Bash(rm -rf:*)", "Read(.env*)", "WebFetch(domain:evil.example)"]
 ```
+
+Where:
+
+- `Read(**)` — read anything; `Edit(pkg/**)` — edit only under `pkg/`.
+- `Bash(go test:*)` — any `go test …` command (`:*` = prefix match).
+- `Grep` (bare) — any grep; `mcp__github__get_*` — any github MCP `get_` tool.
+- `Bash(rm -rf:*)` in `deny:` — never `rm -rf`, even in `ask` mode.
+
+A per-node override is the scalar mode only: `permission: deny` on an
+`agent`/`judge`/`tool` node.
 
 Matching semantics (`pkg/backend/permission`):
 
@@ -134,6 +140,12 @@ identically whichever backend executes it.
 - Studio surfaces the paused approval request through the existing
   human-input UI; dedicated allow/deny buttons are part of the same
   next increment.
+- **Scope:** the gate evaluates the **tool calls an agent/judge LLM
+  makes**. A `tool` node (a direct, deterministic shell command, no LLM)
+  is the action itself and is governed by the **Verified Action** quad
+  (`goal`/`postcondition`/`policy`/`recovery`), not this gate — so a
+  `permission:` mode on a `tool` node is currently reserved (parsed,
+  not yet enforced).
 
 ## See also
 
