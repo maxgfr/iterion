@@ -93,10 +93,11 @@ func (b *StoreInboxBinder) Bind(ctx context.Context, runID string) InboxHook {
 		return nil
 	}
 	return &storeInboxHook{
-		store:     b.Store,
-		publish:   b.Publish,
-		runID:     runID,
-		versioner: asInboxVersioner(b.Store),
+		store:      b.Store,
+		publish:    b.Publish,
+		runID:      runID,
+		activeNode: NodeIDFromContext(ctx),
+		versioner:  asInboxVersioner(b.Store),
 	}
 }
 
@@ -116,6 +117,7 @@ type storeInboxHook struct {
 	store         store.RunStore
 	publish       func(store.Event)
 	runID         string
+	activeNode    string
 	versioner     store.QueuedInboxVersioner
 	lastDelivered []string
 	lastVersion   uint64
@@ -135,7 +137,7 @@ func (h *storeInboxHook) Drain(ctx context.Context) []string {
 		h.lastVersion = v
 		h.versionSeen = true
 	}
-	texts, ids, _ := store.DrainPending(ctx, h.store, h.publish, h.runID)
+	texts, ids, _ := store.DrainPendingForNode(ctx, h.store, h.publish, h.runID, h.activeNode)
 	if len(ids) > 0 {
 		h.lastDelivered = ids
 	}

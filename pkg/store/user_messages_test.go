@@ -8,6 +8,83 @@ import (
 	"time"
 )
 
+// Node-scoped delivery: a message tagged for node "B" must NOT be
+// drained while node "A" is active, but a run-scoped (untagged) message
+// always drains. When "B" becomes active its message drains; an empty
+// active node reproduces the legacy run-scoped behaviour (drains all).
+func TestDrainPendingForNodeScoping(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	const runID = "run-nodescope"
+
+	mk := func(id, node string) {
+		t.Helper()
+		if err := s.AppendQueuedMessage(ctx, runID, QueuedUserMessage{
+			ID: id, Text: "t-" + id, NodeID: node, QueuedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("AppendQueuedMessage %s: %v", id, err)
+		}
+	}
+	mk("run1", "")  // run-scoped
+	mk("forA", "A") // tagged for node A
+	mk("forB", "B") // tagged for node B
+
+	// Node A active: drains run-scoped + A-tagged, leaves B-tagged queued.
+	texts, ids, err := DrainPendingForNode(ctx, s, nil, runID, "A")
+	if err != nil {
+		t.Fatalf("DrainPendingForNode(A): %v", err)
+	}
+	if len(ids) != 2 || !contains(ids, "run1") || !contains(ids, "forA") {
+		t.Fatalf("node A drained %v (texts %v); want run1+forA", ids, texts)
+	}
+	pending, _ := s.LoadPendingQueuedMessages(ctx, runID)
+	if len(pending) != 1 || pending[0].ID != "forB" {
+		t.Fatalf("after A drain, pending=%+v; want only forB", pending)
+	}
+
+	// Node B active: now its message drains.
+	_, ids, err = DrainPendingForNode(ctx, s, nil, runID, "B")
+	if err != nil {
+		t.Fatalf("DrainPendingForNode(B): %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "forB" {
+		t.Fatalf("node B drained %v; want forB", ids)
+	}
+}
+
+// An empty active node drains every queued message regardless of tag —
+// the run-scoped fallback used by operator-typed chatbox messages and
+// the pauseAtHuman drainer.
+func TestDrainPendingForNodeEmptyDrainsAll(t *testing.T) {
+	s := tmpStore(t)
+	ctx := context.Background()
+	const runID = "run-nodescope-all"
+
+	for _, n := range []struct{ id, node string }{{"x", ""}, {"y", "A"}, {"z", "B"}} {
+		if err := s.AppendQueuedMessage(ctx, runID, QueuedUserMessage{
+			ID: n.id, Text: "t", NodeID: n.node, QueuedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("append %s: %v", n.id, err)
+		}
+	}
+	_, ids, err := DrainPendingForNode(ctx, s, nil, runID, "")
+	if err != nil {
+		t.Fatalf("DrainPendingForNode(\"\"): %v", err)
+	}
+	if len(ids) != 3 {
+		t.Fatalf("empty-node drain got %d ids %v; want all 3", len(ids), ids)
+	}
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 // A torn line (crash/OOM/ENOSPC mid-append) must not brick the inbox:
 // the valid records still load. Before the fix, loadLatestQueuedMessages
 // returned an error on the first bad line, so ListQueuedMessages /

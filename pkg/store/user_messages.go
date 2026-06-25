@@ -40,6 +40,13 @@ type QueuedUserMessage struct {
 	Status      QueuedMessageStatus `json:"status" bson:"status"`
 	// TenantID mirrors Run.TenantID for cross-tenant access checks.
 	TenantID string `json:"tenant_id,omitempty" bson:"tenant_id,omitempty"`
+	// NodeID, when set, scopes delivery to a single workflow node: the
+	// drain only releases this message while that node is the active
+	// executing node, so a supervisor watching one node can't leak a
+	// late steering message into the next node. Empty = run-scoped
+	// (delivered at the next drain regardless of active node — the
+	// behaviour for operator-typed chatbox messages).
+	NodeID string `json:"node_id,omitempty" bson:"node_id,omitempty"`
 	// SkillRefs is the list of bundle skill names attached to this
 	// queued message. Before the engine injects the message into the
 	// agent's conversation, each referenced SKILL.md is mirrored into
@@ -325,7 +332,14 @@ func PublishInboxEvent(ctx context.Context, s RunStore, publish func(Event), typ
 // errors are skipped silently — a concurrent cancellation winning
 // the race is acceptable, the row simply won't be delivered.
 func DrainPending(ctx context.Context, s RunStore, publish func(Event), runID string) (texts []string, ids []string, err error) {
-	msgs, _, err := DrainPendingMessages(ctx, s, publish, runID)
+	return DrainPendingForNode(ctx, s, publish, runID, "")
+}
+
+// DrainPendingForNode is the node-scoped sibling of DrainPending: only
+// run-scoped messages and those tagged for activeNode are drained (see
+// DrainPendingMessagesForNode). activeNode=="" reproduces DrainPending.
+func DrainPendingForNode(ctx context.Context, s RunStore, publish func(Event), runID, activeNode string) (texts []string, ids []string, err error) {
+	msgs, _, err := DrainPendingMessagesForNode(ctx, s, publish, runID, activeNode)
 	if err != nil || len(msgs) == 0 {
 		return nil, nil, err
 	}
@@ -349,6 +363,24 @@ func DrainPending(ctx context.Context, s RunStore, publish func(Event), runID st
 // cancellation winning the race is silently skipped (the row simply
 // won't be delivered). FIFO by QueuedAt.
 func DrainPendingMessages(ctx context.Context, s RunStore, publish func(Event), runID string) ([]QueuedUserMessage, []string, error) {
+	return DrainPendingMessagesForNode(ctx, s, publish, runID, "")
+}
+
+// matchesNode reports whether this message may be delivered while
+// activeNode is the executing node. A run-scoped message (NodeID=="")
+// matches any node. When activeNode=="" (the drain doesn't know which
+// node is active) every message matches — run-scoped fallback.
+func (m QueuedUserMessage) matchesNode(activeNode string) bool {
+	return activeNode == "" || m.NodeID == "" || m.NodeID == activeNode
+}
+
+// DrainPendingMessagesForNode is the node-scoped variant of
+// DrainPendingMessages: only messages whose NodeID is empty (run-scoped)
+// or equal to activeNode are transitioned queued→delivered; messages
+// tagged for a different node stay queued until that node is active.
+// activeNode=="" reproduces DrainPendingMessages exactly (run-scoped).
+// FIFO by QueuedAt.
+func DrainPendingMessagesForNode(ctx context.Context, s RunStore, publish func(Event), runID, activeNode string) ([]QueuedUserMessage, []string, error) {
 	pending, err := s.LoadPendingQueuedMessages(ctx, runID)
 	if err != nil || len(pending) == 0 {
 		return nil, nil, err
@@ -356,6 +388,9 @@ func DrainPendingMessages(ctx context.Context, s RunStore, publish func(Event), 
 	msgs := make([]QueuedUserMessage, 0, len(pending))
 	ids := make([]string, 0, len(pending))
 	for _, m := range pending {
+		if !m.matchesNode(activeNode) {
+			continue
+		}
 		if err := s.UpdateQueuedMessageStatus(ctx, runID, m.ID, QueuedMessageStatusDelivered, QueuedMessageStatusQueued); err != nil {
 			continue
 		}

@@ -135,6 +135,7 @@ func (s *Service) QueueMessage(ctx context.Context, runID, text string, opts ...
 		ID:        newQueuedMessageID(),
 		Text:      text,
 		TenantID:  r.TenantID,
+		NodeID:    cfg.nodeID,
 		SkillRefs: cfg.skillRefs,
 	}
 	if err := s.store.AppendQueuedMessage(ctx, runID, msg); err != nil {
@@ -153,6 +154,7 @@ func (s *Service) QueueMessage(ctx context.Context, runID, text string, opts ...
 // only the option-builder helpers below).
 type queueMessageConfig struct {
 	skillRefs []string
+	nodeID    string
 }
 
 // QueueMessageOption is the functional-option form of QueueMessage's
@@ -168,6 +170,16 @@ type QueueMessageOption func(*queueMessageConfig)
 // loaded for the rest of the run. Empty/nil slice is a no-op.
 func WithMessageSkills(skills []string) QueueMessageOption {
 	return func(c *queueMessageConfig) { c.skillRefs = skills }
+}
+
+// WithMessageNode scopes the queued message to a single workflow node:
+// the engine's drain only releases it while that node is the active
+// executing node (see store.QueuedUserMessage.NodeID). A supervisor
+// watching one node tags its steering messages this way so a late
+// message can't leak into the next node. Empty nodeID = run-scoped
+// (the default for operator-typed chatbox messages).
+func WithMessageNode(nodeID string) QueueMessageOption {
+	return func(c *queueMessageConfig) { c.nodeID = nodeID }
 }
 
 // CancelQueuedMessage marks a queued (not-yet-delivered) message as

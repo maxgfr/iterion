@@ -188,6 +188,30 @@ func RunIDFromContext(ctx context.Context) string {
 	return s
 }
 
+// nodeIDOnlyKey carries the currently-executing node id so the
+// operator-inbox binder can node-scope message delivery (a supervisor
+// that watches one node tags its messages with that node; the drain
+// only releases a tagged message while that node is the active one).
+type nodeIDOnlyKey struct{}
+
+// WithNodeID returns a derived ctx carrying the active node id. The
+// runtime engine calls this once per node execution, alongside
+// WithRunID. Empty nodeID is a no-op (drain falls back to run-scope).
+func WithNodeID(ctx context.Context, nodeID string) context.Context {
+	if nodeID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, nodeIDOnlyKey{}, nodeID)
+}
+
+// NodeIDFromContext returns the active node id set by WithNodeID, or
+// "" when none is wired. "" means "run-scoped drain" — every queued
+// message is delivered regardless of its NodeID tag (legacy behaviour).
+func NodeIDFromContext(ctx context.Context) string {
+	s, _ := ctx.Value(nodeIDOnlyKey{}).(string)
+	return s
+}
+
 // runtimeContextKey is the richer ctx key set by ClawExecutor before
 // it calls a backend. The backend reads (runID, store) and maintains
 // the per-node session.

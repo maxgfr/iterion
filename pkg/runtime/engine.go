@@ -1214,6 +1214,7 @@ func (e *Engine) execLoopRunNode(ctx context.Context, rs *runState, currentNodeI
 	// template-data snapshot so the executor can resolve `outputs.*`,
 	// `loop.*`, `artifacts.*`, and `run.*` refs in prompt bodies.
 	execCtx := model.WithRunID(ctx, rs.runID)
+	execCtx = model.WithNodeID(execCtx, currentNodeID)
 	execCtx = model.WithTemplateData(execCtx, e.buildTemplateData(rs))
 	// Per-node span: inherits the runner-side or server-side root
 	// span via ctx (W3C trace propagated through NATS in cloud mode).
