@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SocialGouv/claw-code-go/pkg/api"
+
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/backend/permission"
 )
@@ -82,6 +84,23 @@ func TestExecuteToolsDirect_GateAskSuspends(t *testing.T) {
 	}
 	if executed {
 		t.Error("ask-gated tool must NOT execute before approval")
+	}
+}
+
+func TestFindPendingToolUse(t *testing.T) {
+	msgs := []api.Message{
+		{Role: "user", Content: []api.ContentBlock{{Type: "text", Text: "do it"}}},
+		{Role: "assistant", Content: []api.ContentBlock{
+			{Type: "text", Text: "running"},
+			{Type: "tool_use", ID: "tu_9", Name: "Bash", Input: map[string]any{"command": "go build"}},
+		}},
+	}
+	name, input, ok := findPendingToolUse(msgs, "tu_9")
+	if !ok || name != "Bash" || input["command"] != "go build" {
+		t.Fatalf("findPendingToolUse = (%q,%v,%v)", name, input, ok)
+	}
+	if _, _, ok := findPendingToolUse(msgs, "missing"); ok {
+		t.Error("missing id should not be found")
 	}
 }
 

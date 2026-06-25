@@ -1014,6 +1014,21 @@ func buildOperatorMessage(texts []string) api.Message {
 
 // assistantToolUseMessage builds the assistant turn that contains text (if any)
 // followed by tool_use content blocks.
+// findPendingToolUse scans a rehydrated conversation for the tool_use
+// content block with the given id, returning its tool name and input.
+// Used on resume to tell whether a paused tool_use was the ask_user
+// infra tool or a real action the permission gate suspended.
+func findPendingToolUse(msgs []api.Message, id string) (name string, input map[string]any, ok bool) {
+	for _, m := range msgs {
+		for _, b := range m.Content {
+			if b.Type == "tool_use" && b.ID == id {
+				return b.Name, b.Input, true
+			}
+		}
+	}
+	return "", nil, false
+}
+
 func assistantToolUseMessage(text string, toolUses []toolUseBlock) api.Message {
 	content := make([]api.ContentBlock, 0, len(toolUses)+1)
 	if text != "" {

@@ -190,7 +190,7 @@ func (p *Policy) Evaluate(toolName string, input map[string]any) (Decision, stri
 	// control, watch) is infrastructure, not an agent action against the
 	// environment — never gate it, or `ask` mode would pause on the very
 	// tool used to ask the human. Same exemption on both backends.
-	if isInfrastructureTool(toolName) {
+	if IsInfrastructureTool(toolName) {
 		return Allow, ""
 	}
 	summary := summarize(toolName, input)
@@ -420,13 +420,14 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// isInfrastructureTool reports whether a tool is iterion's own
+// IsInfrastructureTool reports whether a tool is iterion's own
 // runtime plumbing (the interaction + capability surface) rather than
 // an agent action against the environment. These are always allowed by
 // the gate. Covers both backends' spellings: ask_user (claw) /
 // mcp__iterion__ask_user (claude_code), the board / control / watch MCP
-// families, and the iterion-internal __mcp-* servers.
-func isInfrastructureTool(name string) bool {
+// families, and the iterion-internal __mcp-* servers. Exported so the
+// resume path can tell a real ask_user pause from a permission pause.
+func IsInfrastructureTool(name string) bool {
 	n := strings.ToLower(strings.TrimSpace(name))
 	switch n {
 	case "ask_user", "askuser", "send_user_message":

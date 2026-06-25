@@ -16,6 +16,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/cost"
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/backend/permission"
 	"github.com/SocialGouv/iterion/pkg/backend/rtk"
 	"github.com/SocialGouv/iterion/pkg/knowledge"
 	"github.com/SocialGouv/iterion/pkg/memory"
@@ -328,15 +329,38 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 		if task.ResumePendingToolUseID == "" {
 			return delegate.Result{}, fmt.Errorf("claw backend: resume conversation set but pending tool_use ID is empty")
 		}
-		answer := task.ResumeAnswer
-		if answer == "" {
-			answer = "(no answer provided)"
+
+		resultText := task.ResumeAnswer
+		if resultText == "" {
+			resultText = "(no answer provided)"
 		}
+		isErr := false
+
+		// Permission-gate resume: when the pending tool_use is a real
+		// action the gate paused on (not the ask_user infra tool), the
+		// operator's answer is an authorization decision, not a question
+		// answer. Approve → record the grant (so the agent's re-issued
+		// call passes the gate) and instruct it to re-run; deny → refuse.
+		// This reuses the normal tool loop (executeToolsDirect runs the
+		// re-issued call with full hooks/secret-materialisation), so no
+		// out-of-band execution path is needed.
+		if name, input, ok := findPendingToolUse(prior, task.ResumePendingToolUseID); ok &&
+			!permission.IsInfrastructureTool(name) && task.Permission.Enabled() {
+			if allow, always := permission.ParseAnswer(task.ResumeAnswer); allow {
+				task.Permission.AddAllowRule(permission.GrantRuleFor(name, input, always))
+				resultText = "✅ The operator approved this action. Re-issue the exact same tool call now to perform it."
+			} else {
+				resultText = "⛔ The operator denied this action. Do not retry it; take a different approach or explain why it is needed."
+				isErr = true
+			}
+		}
+
 		prior = append(prior, api.Message{
 			Role: "user",
 			Content: []api.ContentBlock{api.ToolResult{
 				ToolUseID: task.ResumePendingToolUseID,
-				Content:   answer,
+				Content:   resultText,
+				IsError:   isErr,
 			}.ToContentBlock()},
 		})
 		opts.Messages = prior
