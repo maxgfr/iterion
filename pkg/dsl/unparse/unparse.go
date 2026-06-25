@@ -182,7 +182,7 @@ func (w *fileWriter) writeAgents(agents []*ast.AgentDecl) {
 			ToolMaxSteps: a.ToolMaxSteps, MaxTokens: a.MaxTokens, ReasoningEffort: a.ReasoningEffort,
 			Readonly: a.Readonly, Interaction: a.Interaction, InteractionPrompt: a.InteractionPrompt,
 			InteractionModel: a.InteractionModel, Await: a.Await,
-			RTK: a.RTK,
+			RTK: a.RTK, Permission: a.Permission,
 		})
 		if a.Compaction != nil {
 			writeCompaction(&w.b, a.Compaction, "  ", false)
@@ -212,7 +212,7 @@ func (w *fileWriter) writeJudges(judges []*ast.JudgeDecl) {
 			ToolMaxSteps: j.ToolMaxSteps, MaxTokens: j.MaxTokens, ReasoningEffort: j.ReasoningEffort,
 			Readonly: j.Readonly, Interaction: j.Interaction, InteractionPrompt: j.InteractionPrompt,
 			InteractionModel: j.InteractionModel, Await: j.Await,
-			RTK: j.RTK,
+			RTK: j.RTK, Permission: j.Permission,
 		})
 		if j.Compaction != nil {
 			writeCompaction(&w.b, j.Compaction, "  ", false)
@@ -346,6 +346,9 @@ func (w *fileWriter) writeTools(tools []*ast.ToolNodeDecl) {
 		if t.RTK != "" {
 			writeProp(&w.b, "rtk", t.RTK)
 		}
+		if t.Permission != "" {
+			writeProp(&w.b, "permission", t.Permission)
+		}
 		// Verified Action quad (ADR-044).
 		if t.Goal != "" {
 			writeQuotedProp(&w.b, "goal", t.Goal)
@@ -446,6 +449,19 @@ func (w *fileWriter) writeWorkflows(workflows []*ast.WorkflowDecl) {
 
 		if wf.RTK != "" {
 			writeProp(&w.b, "rtk", wf.RTK)
+		}
+
+		if wf.Permission != "" {
+			writeProp(&w.b, "permission", wf.Permission)
+		}
+		if len(wf.Allow) > 0 {
+			fmt.Fprintf(&w.b, "  allow: [%s]\n", quoteList(wf.Allow))
+		}
+		if len(wf.Ask) > 0 {
+			fmt.Fprintf(&w.b, "  ask: [%s]\n", quoteList(wf.Ask))
+		}
+		if len(wf.Deny) > 0 {
+			fmt.Fprintf(&w.b, "  deny: [%s]\n", quoteList(wf.Deny))
 		}
 
 		writeSandboxBlock(&w.b, wf.Sandbox, "  ")
@@ -715,6 +731,7 @@ type llmFields struct {
 	InteractionPrompt, InteractionModel string
 	Await                               ast.AwaitMode
 	RTK                                 string
+	Permission                          string
 }
 
 func writeAgentFields(b *strings.Builder, f llmFields) {
@@ -785,6 +802,9 @@ func writeAgentFields(b *strings.Builder, f llmFields) {
 	}
 	if f.RTK != "" {
 		writeProp(b, "rtk", f.RTK)
+	}
+	if f.Permission != "" {
+		writeProp(b, "permission", f.Permission)
 	}
 }
 

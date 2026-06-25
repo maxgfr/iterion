@@ -6,6 +6,8 @@ import (
 
 	"github.com/SocialGouv/claw-code-go/pkg/api"
 	"github.com/SocialGouv/claw-code-go/pkg/api/hooks"
+
+	"github.com/SocialGouv/iterion/pkg/backend/permission"
 )
 
 // GenerationTool describes a tool available during direct generation.
@@ -141,4 +143,12 @@ type GenerationOptions struct {
 	// mid-stream — mirroring Claude Code CLI's queued-message
 	// semantics. Nil disables the inbox plumbing.
 	Inbox InboxHook
+
+	// Permission, when enabled, is the tool-permission gate evaluated
+	// before each tool executes (the anti-prompt-injection boundary).
+	// Allow → execute; Deny → a synthetic refusal tool_result; Ask →
+	// the loop aborts with a *delegate.ErrAskUser so the run pauses and
+	// the human approves (claw's half of cross-backend parity with
+	// claude_code's PreToolUse permission hook). Nil/disabled = no gate.
+	Permission *permission.Policy
 }

@@ -99,6 +99,8 @@ const (
 	DiagExprOperandTypeMismatch DiagCode = "C107" // compute/when expression operands incompatible under the operator (warning)
 	DiagWhenExprNotBoolish      DiagCode = "C108" // when-expression result clearly not bool-coercible (warning)
 	DiagVarDefaultTypeMismatch  DiagCode = "C109" // a var's default literal type does not match its declared type (error)
+	DiagInvalidPermission       DiagCode = "C110" // permission: value not one of off|ask|deny (error)
+	DiagPermissionRulesNoGate   DiagCode = "C111" // allow/ask/deny rules declared but the resolved permission mode is "" or off (warning)
 )
 
 // validate performs static validation on a compiled workflow.
@@ -132,6 +134,7 @@ func (c *compiler) validate(w *Workflow) {
 	c.validateCursorInvocations(w)
 	c.validateReviewGates(w)
 	c.validateRTK(w)
+	c.validatePermission(w)
 	c.validateVerifiedActions(w)
 }
 
@@ -174,6 +177,66 @@ func (c *compiler) validateRTK(w *Workflow) {
 				kind, n.NodeID(), rtk)
 		}
 	}
+}
+
+// validatePermission enforces that every permission gate mode (workflow-level
+// + every agent/judge/tool node override) is one of the accepted barewords
+// off|ask|deny. Empty ("") means unset/inherit and is always valid; the
+// comparison is case-insensitive and whitespace-trimmed (C110, error).
+//
+// It also warns (C111) when the workflow declares allow/ask/deny rules but the
+// resolved workflow permission mode is "" or "off" — the rules are inert
+// because the gate is disabled.
+func (c *compiler) validatePermission(w *Workflow) {
+	valid := func(v string) bool {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "", "off", "ask", "deny":
+			return true
+		}
+		return false
+	}
+	if !valid(w.Permission) {
+		c.errorf(DiagInvalidPermission,
+			"workflow %q has invalid permission %q; valid values are off, ask, deny",
+			w.Name, w.Permission)
+	}
+	for _, n := range w.Nodes {
+		var perm string
+		var kind string
+		switch nn := n.(type) {
+		case LLMNode:
+			perm, kind = nn.GetPermission(), nn.NodeKind().String()
+		case *ToolNode:
+			perm, kind = nn.Permission, "tool"
+		default:
+			continue
+		}
+		if !valid(perm) {
+			c.errorf(DiagInvalidPermission,
+				"%s %q has invalid permission %q; valid values are off, ask, deny",
+				kind, n.NodeID(), perm)
+		}
+	}
+
+	// C111: rules declared but the gate is disabled. The resolved workflow
+	// mode is "" or "off" → the allow/ask/deny lists never take effect.
+	mode := strings.ToLower(strings.TrimSpace(w.Permission))
+	gateDisabled := mode == "" || mode == "off"
+	hasRules := len(w.PermissionAllow) > 0 || len(w.PermissionAsk) > 0 || len(w.PermissionDeny) > 0
+	if gateDisabled && hasRules {
+		c.warnf(DiagPermissionRulesNoGate,
+			"workflow %q declares allow/ask/deny permission rules but the permission gate is %s; rules are inert",
+			w.Name, modeLabel(mode))
+	}
+}
+
+// modeLabel renders an empty permission mode as "off (unset)" for a clearer
+// diagnostic message.
+func modeLabel(mode string) string {
+	if mode == "" {
+		return "off (unset)"
+	}
+	return mode
 }
 
 // validateReviewGates enforces the review-&-merge gate's preconditions.

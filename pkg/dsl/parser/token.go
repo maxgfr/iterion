@@ -148,6 +148,11 @@ const (
 	TokenWorktree
 	// RTK output-compression mode: on|off|ultra
 	TokenRTK
+	// Permission gate: scalar mode + allow/ask/deny rule lists
+	TokenPermission
+	TokenAllow
+	TokenAsk
+	TokenDeny
 	// Sandbox (Phase 0: simple "sandbox: ident" form for none|auto)
 	TokenSandbox
 	// Cursor declaration + activation block
@@ -286,6 +291,10 @@ var tokenNames = map[TokenType]string{
 	TokenVisibility:       "visibility",
 	TokenWorktree:         "worktree",
 	TokenRTK:              "rtk",
+	TokenPermission:       "permission",
+	TokenAllow:            "allow",
+	TokenAsk:              "ask",
+	TokenDeny:             "deny",
 	TokenSandbox:          "sandbox",
 	TokenCursor:           "cursor",
 	TokenCursors:          "cursors",
@@ -403,6 +412,10 @@ var keywords = map[string]TokenType{
 	"visibility":            TokenVisibility,
 	"worktree":              TokenWorktree,
 	"rtk":                   TokenRTK,
+	"permission":            TokenPermission,
+	"allow":                 TokenAllow,
+	"ask":                   TokenAsk,
+	"deny":                  TokenDeny,
 	"sandbox":               TokenSandbox,
 	"cursor":                TokenCursor,
 	"cursors":               TokenCursors,

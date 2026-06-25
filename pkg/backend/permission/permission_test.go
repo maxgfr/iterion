@@ -1,0 +1,153 @@
+package permission
+
+import "testing"
+
+func TestParseMode(t *testing.T) {
+	cases := map[string]Mode{
+		"":        ModeOff,
+		"off":     ModeOff,
+		"bypass":  ModeOff,
+		"ask":     ModeAsk,
+		"default": ModeAsk,
+		"deny":    ModeDeny,
+		"dontAsk": ModeDeny,
+	}
+	for in, want := range cases {
+		got, err := ParseMode(in)
+		if err != nil {
+			t.Fatalf("ParseMode(%q) error: %v", in, err)
+		}
+		if got != want {
+			t.Errorf("ParseMode(%q) = %v, want %v", in, got, want)
+		}
+	}
+	if _, err := ParseMode("askk"); err == nil {
+		t.Error("ParseMode(askk) should error on typo")
+	}
+}
+
+func mustPolicy(t *testing.T, mode Mode, allow, ask, deny []string) *Policy {
+	t.Helper()
+	p, err := NewPolicy(mode, allow, ask, deny)
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	return p
+}
+
+func TestEvaluate_PrecedenceAndModes(t *testing.T) {
+	type tc struct {
+		name  string
+		tool  string
+		input map[string]any
+		want  Decision
+	}
+	p := mustPolicy(t,
+		ModeAsk,
+		[]string{"Read(**)", "Bash(go test:*)"},
+		[]string{"Bash(git push:*)"},
+		[]string{"Bash(rm -rf:*)", "WebFetch(domain:evil.example)"},
+	)
+	cases := []tc{
+		{"deny wins on rm", "Bash", map[string]any{"command": "rm -rf /"}, Deny},
+		{"ask rule git push", "Bash", map[string]any{"command": "git push origin main"}, Ask},
+		{"allow go test", "Bash", map[string]any{"command": "go test ./..."}, Allow},
+		{"allow read any", "Read", map[string]any{"file_path": "/etc/hosts"}, Allow},
+		{"unmatched bash -> ask mode default", "Bash", map[string]any{"command": "curl http://x"}, Ask},
+		{"deny webfetch evil by domain", "WebFetch", map[string]any{"url": "https://evil.example/steal"}, Deny},
+		{"unmatched webfetch -> ask", "WebFetch", map[string]any{"url": "https://good.example"}, Ask},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, _ := p.Evaluate(c.tool, c.input)
+			if got != c.want {
+				t.Errorf("Evaluate(%s) = %v, want %v", c.tool, got, c.want)
+			}
+		})
+	}
+}
+
+func TestEvaluate_DenyModeUnmatchedIsDeny(t *testing.T) {
+	p := mustPolicy(t, ModeDeny, []string{"Read(**)"}, nil, nil)
+	if got, _ := p.Evaluate("Read", map[string]any{"file_path": "x"}); got != Allow {
+		t.Errorf("allowed read = %v, want Allow", got)
+	}
+	if got, _ := p.Evaluate("Bash", map[string]any{"command": "ls"}); got != Deny {
+		t.Errorf("unmatched bash in deny mode = %v, want Deny", got)
+	}
+}
+
+func TestEvaluate_OffModeIsAllowAll(t *testing.T) {
+	p := mustPolicy(t, ModeOff, nil, nil, []string{"Bash(rm:*)"})
+	if p.Enabled() {
+		t.Fatal("off-mode policy should be disabled")
+	}
+	if got, _ := p.Evaluate("Bash", map[string]any{"command": "rm -rf /"}); got != Allow {
+		t.Errorf("off mode = %v, want Allow (gate disabled)", got)
+	}
+}
+
+// Parity: the SAME rule must gate the matching tool on both backends —
+// claude_code TitleCase names and claw snake_case names.
+func TestEvaluate_CrossBackendParity(t *testing.T) {
+	p := mustPolicy(t, ModeAsk, []string{"Edit(pkg/**)"}, nil, []string{"Bash(curl:*)"})
+
+	for _, name := range []string{"Bash", "bash", "shell"} {
+		if got, _ := p.Evaluate(name, map[string]any{"command": "curl http://x"}); got != Deny {
+			t.Errorf("%s curl = %v, want Deny", name, got)
+		}
+	}
+	for _, edit := range []string{"Edit", "edit_file", "file_edit", "MultiEdit", "Write", "write_file"} {
+		// Edit alias covers Write too in our table? Write is separate; test edits only.
+		_ = edit
+	}
+	for _, name := range []string{"Edit", "edit_file", "file_edit"} {
+		if got, _ := p.Evaluate(name, map[string]any{"file_path": "pkg/foo/bar.go"}); got != Allow {
+			t.Errorf("%s pkg edit = %v, want Allow", name, got)
+		}
+		if got, _ := p.Evaluate(name, map[string]any{"file_path": "cmd/main.go"}); got != Ask {
+			t.Errorf("%s cmd edit = %v, want Ask (unmatched)", name, got)
+		}
+	}
+}
+
+func TestEvaluate_BareToolAndGlobs(t *testing.T) {
+	p := mustPolicy(t, ModeAsk,
+		[]string{"Grep", "mcp__github__get_*"},
+		nil,
+		[]string{"*"}, // deny-all glob still overridden? no: deny wins. Use carefully.
+	)
+	// deny-all `*` makes everything Deny (deny precedence). Grep allow is shadowed.
+	if got, _ := p.Evaluate("Grep", map[string]any{"pattern": "TODO"}); got != Deny {
+		t.Errorf("grep with deny-all = %v, want Deny", got)
+	}
+
+	// Without the deny-all, bare allow + mcp glob work.
+	p2 := mustPolicy(t, ModeAsk, []string{"Grep", "mcp__github__get_*"}, nil, nil)
+	if got, _ := p2.Evaluate("Grep", map[string]any{"pattern": "TODO"}); got != Allow {
+		t.Errorf("bare Grep allow = %v, want Allow", got)
+	}
+	if got, _ := p2.Evaluate("mcp__github__get_issue", map[string]any{}); got != Allow {
+		t.Errorf("mcp glob allow = %v, want Allow", got)
+	}
+	if got, _ := p2.Evaluate("mcp__github__create_issue", map[string]any{}); got != Ask {
+		t.Errorf("mcp non-matching = %v, want Ask", got)
+	}
+}
+
+func TestNewPolicy_MalformedRule(t *testing.T) {
+	if _, err := NewPolicy(ModeAsk, []string{"Bash(unterminated"}, nil, nil); err == nil {
+		t.Error("expected error on missing ')'")
+	}
+}
+
+func TestAddAllowRule_AllowAlways(t *testing.T) {
+	p := mustPolicy(t, ModeAsk, nil, nil, nil)
+	if got, _ := p.Evaluate("Bash", map[string]any{"command": "go build"}); got != Ask {
+		t.Fatalf("pre-grant = %v, want Ask", got)
+	}
+	p.AddAllowRule("Bash(go build:*)")
+	if got, _ := p.Evaluate("Bash", map[string]any{"command": "go build ./..."}); got != Allow {
+		t.Errorf("post-grant = %v, want Allow", got)
+	}
+}

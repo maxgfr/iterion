@@ -168,6 +168,8 @@ Other top-level directories: `studio/` (React/Vite frontend), `examples/` (.iter
 
 **`rtk:` field** (`on|ultra|off`) — opt-in command-output compression on the `workflow` block and on `agent`/`judge`/`tool` nodes (off by default; see the rtk section above + [docs/rtk.md](docs/rtk.md)).
 
+**`permission:` field** (`off|ask|deny`) + `allow:`/`ask:`/`deny:` rule lists — opt-in **tool-permission gate** (the anti-prompt-injection boundary). Mode on the `workflow` block and as a per-node override; rule lists (Claude-Code `Tool(pattern)` syntax, e.g. `Bash(go test:*)`, `Read(**)`, `Edit(pkg/**)`) on the workflow block. `off` (default) = today's bypassPermissions; `ask` pauses for human approval on any call not allow-listed; `deny` hard-blocks it (headless). The SAME resolved `permission.Policy` ([pkg/backend/permission](pkg/backend/permission/permission.go)) drives BOTH backends — claude_code's `wirePermissionHook` PreToolUse hook and claw's `executeToolsDirect` gate — so a bot behaves identically on either. Precedence (mirrors `rtk:`): CLI `--permission`/`--permission-allow|ask|deny` → node → workflow → `ITERION_PERMISSION` → off. Diagnostics C110/C111. See [docs/permissions.md](docs/permissions.md).
+
 **Edge syntax:**
 ```
 src -> dst                              # default edge
@@ -213,6 +215,15 @@ Code:
   prompt, so iterion prepends an authored `agenticOperatingPosture` base
   (the parity substrate) before the node's `system:` text. A node's
   `tools:` list **does** restrict claw (lowercase names are claw-native).
+
+The `bypassPermissions` note above describes the default (`permission:
+off`). The opt-in **permission gate** (`permission: ask|deny`, see the
+DSL section + [docs/permissions.md](docs/permissions.md)) adds a
+deterministic allow/deny/ask boundary on top — without changing
+`--permission-mode` (under bypass, PreToolUse hooks still run and a hook
+`deny` still blocks the tool, so the gate rides the existing hook
+surface). It is the anti-prompt-injection counterpart that keeps a
+hypnotized/injected agent from silently performing off-policy actions.
 
 The mechanism is `delegate.SystemPromptMode` (Standalone | AppendToNative
 | AuthoredBase), set per-backend by `SystemPromptModeForBackend`

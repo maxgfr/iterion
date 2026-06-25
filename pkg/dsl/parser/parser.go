@@ -1156,6 +1156,9 @@ func (p *parser) parseLLMProp(d *ast.LLMDecl, propTok Token, kind string) {
 	case TokenRTK:
 		p.expect(TokenColon)
 		d.RTK = p.expectIdent()
+	case TokenPermission:
+		p.expect(TokenColon)
+		d.Permission = p.expectIdent()
 	case TokenProvider:
 		p.expect(TokenColon)
 		d.Provider = p.expectString()
@@ -1485,6 +1488,9 @@ func (p *parser) parseToolNodeProp(td *ast.ToolNodeDecl, propTok Token) {
 	case TokenRTK:
 		p.expect(TokenColon)
 		td.RTK = p.expectIdent()
+	case TokenPermission:
+		p.expect(TokenColon)
+		td.Permission = p.expectIdent()
 	case TokenIdent:
 		// Verified Action quad (ADR-044). These property names are not
 		// reserved keywords, so they arrive as plain identifiers (the
@@ -1726,6 +1732,30 @@ func (p *parser) parseWorkflowDecl() *ast.WorkflowDecl {
 			p.next() // consume "rtk"
 			p.expect(TokenColon)
 			wd.RTK = p.expectIdent()
+			p.skipNewlines()
+
+		case TokenPermission:
+			p.next() // consume "permission"
+			p.expect(TokenColon)
+			wd.Permission = p.expectIdent()
+			p.skipNewlines()
+
+		case TokenAllow:
+			p.next() // consume "allow"
+			p.expect(TokenColon)
+			wd.Allow = p.parseStringList()
+			p.skipNewlines()
+
+		case TokenAsk:
+			p.next() // consume "ask"
+			p.expect(TokenColon)
+			wd.Ask = p.parseStringList()
+			p.skipNewlines()
+
+		case TokenDeny:
+			p.next() // consume "deny"
+			p.expect(TokenColon)
+			wd.Deny = p.parseStringList()
 			p.skipNewlines()
 
 		case TokenSandbox:
@@ -2361,6 +2391,7 @@ func isKeywordToken(tt TokenType) bool {
 		TokenMemory, TokenEnabled, TokenScope, TokenAutoload, TokenRead, TokenWrite, TokenPreCompactInject,
 		TokenWorktree,
 		TokenRTK,
+		TokenPermission, TokenAllow, TokenAsk, TokenDeny,
 		TokenSandbox,
 		TokenCursor, TokenCursors, TokenValues, TokenBands,
 		TokenAttachments, TokenTypeFile, TokenTypeImage,

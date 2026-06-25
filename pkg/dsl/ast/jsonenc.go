@@ -302,6 +302,7 @@ type jsonAgentDecl struct {
 	Sandbox           *jsonSandboxBlock    `json:"sandbox,omitempty"`
 	Cursors           *jsonCursorBlock     `json:"cursors,omitempty"`
 	RTK               string               `json:"rtk,omitempty"`
+	Permission        string               `json:"permission,omitempty"`
 }
 
 type jsonJudgeDecl struct {
@@ -332,6 +333,7 @@ type jsonJudgeDecl struct {
 	Sandbox           *jsonSandboxBlock    `json:"sandbox,omitempty"`
 	Cursors           *jsonCursorBlock     `json:"cursors,omitempty"`
 	RTK               string               `json:"rtk,omitempty"`
+	Permission        string               `json:"permission,omitempty"`
 }
 
 type jsonRouterDecl struct {
@@ -377,6 +379,7 @@ type jsonToolNodeDecl struct {
 	Await         string             `json:"await,omitempty"`
 	Sandbox       *jsonSandboxBlock  `json:"sandbox,omitempty"`
 	RTK           string             `json:"rtk,omitempty"`
+	Permission    string             `json:"permission,omitempty"`
 	Goal          string             `json:"goal,omitempty"`
 	Postcondition string             `json:"postcondition,omitempty"`
 	Policy        string             `json:"policy,omitempty"`
@@ -555,6 +558,10 @@ type jsonWorkflowDecl struct {
 	Interaction    string                `json:"interaction,omitempty"`
 	Worktree       string                `json:"worktree,omitempty"`
 	RTK            string                `json:"rtk,omitempty"`
+	Permission     string                `json:"permission,omitempty"`
+	Allow          []string              `json:"allow,omitempty"`
+	Ask            []string              `json:"ask,omitempty"`
+	Deny           []string              `json:"deny,omitempty"`
 	Sandbox        *jsonSandboxBlock     `json:"sandbox,omitempty"`
 	Edges          []*jsonEdge           `json:"edges,omitempty"`
 }
@@ -668,6 +675,7 @@ func toJSON(f *File) *jsonFile {
 			Await:         awaitModeToStr[t.Await],
 			Sandbox:       sandboxBlockToJSON(t.Sandbox),
 			RTK:           t.RTK,
+			Permission:    t.Permission,
 			Goal:          t.Goal,
 			Postcondition: t.Postcondition,
 			Policy:        t.Policy,
@@ -970,6 +978,7 @@ func agentToJSON(a *AgentDecl) *jsonAgentDecl {
 		Sandbox:           sandboxBlockToJSON(a.Sandbox),
 		Cursors:           cursorBlockToJSON(a.Cursors),
 		RTK:               a.RTK,
+		Permission:        a.Permission,
 	}
 }
 
@@ -1002,6 +1011,7 @@ func judgeToJSON(j *JudgeDecl) *jsonJudgeDecl {
 		Sandbox:           sandboxBlockToJSON(j.Sandbox),
 		Cursors:           cursorBlockToJSON(j.Cursors),
 		RTK:               j.RTK,
+		Permission:        j.Permission,
 	}
 }
 
@@ -1038,6 +1048,10 @@ func workflowToJSON(w *WorkflowDecl) *jsonWorkflowDecl {
 		Compaction:     compactionToJSON(w.Compaction),
 		Worktree:       w.Worktree,
 		RTK:            w.RTK,
+		Permission:     w.Permission,
+		Allow:          w.Allow,
+		Ask:            w.Ask,
+		Deny:           w.Deny,
 		Sandbox:        sandboxBlockToJSON(w.Sandbox),
 	}
 	if w.Vars != nil {
@@ -1217,6 +1231,7 @@ func fromJSON(jf *jsonFile) (*File, error) {
 			Await:         aw,
 			Sandbox:       sandboxBlockFromJSON(jt.Sandbox),
 			RTK:           jt.RTK,
+			Permission:    jt.Permission,
 			Goal:          jt.Goal,
 			Postcondition: jt.Postcondition,
 			Policy:        jt.Policy,
@@ -1427,6 +1442,7 @@ func agentFromJSON(ja *jsonAgentDecl) (*AgentDecl, error) {
 			Sandbox:           sandboxBlockFromJSON(ja.Sandbox),
 			Cursors:           cursorBlockFromJSON(ja.Cursors),
 			RTK:               ja.RTK,
+			Permission:        ja.Permission,
 		},
 	}, nil
 }
@@ -1473,6 +1489,7 @@ func judgeFromJSON(jj *jsonJudgeDecl) (*JudgeDecl, error) {
 			Sandbox:           sandboxBlockFromJSON(jj.Sandbox),
 			Cursors:           cursorBlockFromJSON(jj.Cursors),
 			RTK:               jj.RTK,
+			Permission:        jj.Permission,
 		},
 	}, nil
 }
@@ -1526,6 +1543,10 @@ func workflowFromJSON(jw *jsonWorkflowDecl) (*WorkflowDecl, error) {
 		Compaction:     compactionFromJSON(jw.Compaction),
 		Worktree:       jw.Worktree,
 		RTK:            jw.RTK,
+		Permission:     jw.Permission,
+		Allow:          jw.Allow,
+		Ask:            jw.Ask,
+		Deny:           jw.Deny,
 		Sandbox:        sandboxBlockFromJSON(jw.Sandbox),
 	}
 	if jw.Vars != nil {

@@ -359,6 +359,11 @@ func (b *ClawBackend) Execute(ctx context.Context, task delegate.Task) (delegate
 	// observability). Nil-safe at call sites in generation.go.
 	opts.Hooks = b.lifecycleHooks
 
+	// Tool-permission gate (anti-prompt-injection boundary). The
+	// resolved policy is evaluated before each tool executes; see
+	// pkg/backend/permission and generation.go's executeToolsDirect.
+	opts.Permission = task.Permission
+
 	// Wire the operator-chatbox inbox if the runtime configured one.
 	// Resolved per-call so a backend shared across runs picks up the
 	// right hook for each run.

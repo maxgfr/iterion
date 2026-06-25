@@ -17,6 +17,7 @@ import (
 
 	"github.com/SocialGouv/iterion/pkg/backend/cost"
 	"github.com/SocialGouv/iterion/pkg/backend/delegate/claudesdk"
+	"github.com/SocialGouv/iterion/pkg/backend/permission"
 	"github.com/SocialGouv/iterion/pkg/backend/rtk"
 	"github.com/SocialGouv/iterion/pkg/backend/thinktokens"
 	"github.com/SocialGouv/iterion/pkg/backend/tooldisplay"
@@ -408,6 +409,11 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, task Task) (result Resu
 	var pendingQuestion atomic.Value // string
 	opts = b.wireAskUserHook(task, opts, &extraAllowedTools, &pendingQuestion, cancelStream)
 
+	// Tool-permission gate (anti-prompt-injection boundary). Shares the
+	// pendingQuestion/cancelStream pause path with ask_user so an Ask
+	// decision surfaces to the human exactly like a clarifying question.
+	opts = b.wirePermissionHook(task, opts, &pendingQuestion, cancelStream)
+
 	// Secret materialisation, rtk command compression, and board MCP wiring —
 	// each a self-contained set of opts hooks/servers (see helpers). Board
 	// and ask_user extend extraAllowedTools; the single registration below
@@ -759,6 +765,59 @@ func (b *ClaudeCodeBackend) wireAskUserHook(task Task, opts []claudesdk.Option, 
 		},
 	}))
 	return opts
+}
+
+// wirePermissionHook installs the tool-permission gate for claude_code:
+// a broad PreToolUse hook (Matcher nil = every tool) that evaluates the
+// resolved policy before the CLI runs a tool. This is claude_code's half
+// of cross-backend parity with claw's executeToolsDirect gate — both
+// honour the SAME permission.Policy.
+//
+// Under the always-on --permission-mode bypassPermissions, PreToolUse
+// hooks STILL run and a "deny" decision STILL blocks the tool (per the
+// Agent SDK permission-evaluation order: hooks run first). So the gate
+// needs no --permission-mode change:
+//   - Allow → empty HookOutput → falls through → bypass approves.
+//   - Deny  → permissionDecision "deny" with a reason the model adapts to.
+//   - Ask   → capture the approval prompt + cancel the stream so the run
+//     PAUSES for the human (reuses the ask_user pause path:
+//     pendingQuestion + buildAskUserPendingResult). On resume the operator
+//     grants and the model re-issues the now-authorized call.
+//
+// Infrastructure tools (ask_user, board.*) are exempt inside
+// permission.Policy.Evaluate, so this hook never blocks iterion's own
+// interaction plumbing.
+func (b *ClaudeCodeBackend) wirePermissionHook(task Task, opts []claudesdk.Option, pendingQuestion *atomic.Value, cancelStream context.CancelFunc) []claudesdk.Option {
+	policy := task.Permission
+	if !policy.Enabled() {
+		return opts
+	}
+	noContinue := false
+	return append(opts, claudesdk.WithHook(claudesdk.HookPreToolUse, claudesdk.HookMatcher{
+		Handler: func(_ context.Context, in claudesdk.HookCallbackInput) (claudesdk.HookOutput, error) {
+			dec, rule := policy.Evaluate(in.ToolName, in.ToolInput)
+			switch dec {
+			case permission.Deny:
+				return claudesdk.HookOutput{
+					Decision:       "deny",
+					DecisionReason: permission.DenyMessage(in.ToolName, in.ToolInput, rule),
+				}, nil
+			case permission.Ask:
+				// Surface the approval request to the human and stop the
+				// stream — the post-session check reuses the ask_user
+				// pending path to pause the run.
+				pendingQuestion.Store(permission.AskPrompt(in.ToolName, in.ToolInput, rule))
+				cancelStream()
+				return claudesdk.HookOutput{
+					Decision:      "deny",
+					Continue:      &noContinue,
+					SystemMessage: "This action requires operator approval; it has been escalated to the iterion runtime. Stop generating.",
+				}, nil
+			default: // permission.Allow
+				return claudesdk.HookOutput{}, nil
+			}
+		},
+	}))
 }
 
 // installMaterializeSecretsHook adds a PreToolUse hook that swaps

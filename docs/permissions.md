@@ -1,0 +1,143 @@
+# Tool-permission gate (anti-prompt-injection)
+
+iterion's permission gate restores Claude Code's default **"ask before
+acting"** posture to iterion workflows — and brings it to the **claw**
+backend too, so claude_code and claw reach **identical** decisions.
+
+## Why
+
+By default every `claude_code` and `claw` node runs effectively in
+**bypassPermissions**: any tool the model decides to call executes
+unconditionally. That is convenient but it is also the posture a
+prompt-injection or "hypnosis" attack relies on — a poisoned web page,
+a malicious file, or a confused chain of reasoning can get the agent to
+exfiltrate a secret, `curl` an attacker, `rm -rf` a tree, or `git push`
+to a rogue remote, and nothing stops it.
+
+The gate makes the operator's **allow-list the frame of what's
+authorized**, evaluated by deterministic code **outside the model's
+controllable surface** (`pkg/backend/permission`). Anything off-frame is
+denied, or surfaced to a human — exactly like Claude Code's `canUseTool`
+default. The model cannot talk its way past a rule, because the rules
+are not part of its context.
+
+This mirrors the official Anthropic model (Agent SDK *Configure
+permissions* + *Handle approvals and user input*): tool calls are
+evaluated **deny rules → ask rules → allow rules → mode default**, and
+unmatched calls fall through to human approval.
+
+## Modes
+
+Set on the `workflow` block, per node, the CLI, or the environment.
+**Opt-in: the default is `off`** — existing bots are unchanged.
+
+| iterion `permission:` | Claude Code analog | Behavior |
+| --- | --- | --- |
+| `off` (default) | `bypassPermissions` | No gate (today's behavior). |
+| `ask` | `default` | allow-rules auto-approve; **deny**-rules hard-block; everything else **pauses the run and surfaces the call to the human** (resumable). |
+| `deny` | `dontAsk` | allow-rules approve; everything else is **hard-denied with no pause** — the policy boundary for headless / cloud / cron runs with no human attached. |
+
+## Rule syntax
+
+Rules use Claude Code's syntax — a bare tool name matches any use, or a
+scoped `Tool(pattern)` matches an argument:
+
+```
+permission: ask
+allow:
+  - "Read(**)"            # read anything
+  - "Edit(pkg/**)"        # edit only under pkg/
+  - "Bash(go test:*)"     # any `go test …` command (`:*` = prefix match)
+  - "Grep"                # any grep
+  - "mcp__github__get_*"  # any github MCP get_ tool
+deny:
+  - "Bash(rm -rf:*)"      # never rm -rf, even in ask mode
+  - "Read(.env*)"         # never read dotenv files
+  - "WebFetch(domain:evil.example)"
+```
+
+Matching semantics (`pkg/backend/permission`):
+
+- **Bash** patterns match the `command`; `prefix:*` is a prefix match,
+  a bare wildcard `*`/`**` is a greedy match, no wildcard is exact.
+- **Read / Edit / Write / NotebookEdit** patterns match the file path;
+  `pkg/**`, `*.go` etc. work as gitignore-style globs.
+- **WebFetch** patterns match `domain:<host>`, `<host>`, or the full URL.
+- **Tool-name globs**: `*` (any tool) and `mcp__<server>__*`.
+
+**Cross-backend parity.** The same rule gates the matching tool on both
+backends: a single `Bash(...)` rule covers claude_code's `Bash` and
+claw's `bash`/`shell`; `Edit(...)` covers `Edit`/`edit_file`/`file_edit`;
+`Read(...)` covers `Read`/`read_file`; etc. (see `canonicalToolName`).
+
+**Infrastructure exemption.** iterion's own interaction/capability
+plumbing — `ask_user`, the board / control / watch MCP families — is
+never gated (or `ask` mode would pause on the very tool used to ask the
+human).
+
+## Precedence
+
+Mode resolves with the same precedence as `rtk:`:
+
+```
+CLI --permission  >  node permission:  >  workflow permission:  >  ITERION_PERMISSION  >  off
+```
+
+Rule lists are **additive**: the workflow `allow:`/`ask:`/`deny:` lists
+plus any `--permission-allow`/`--permission-ask`/`--permission-deny`
+run-level rules.
+
+## CLI
+
+```bash
+iterion run bot.bot --permission ask \
+  --permission-allow 'Read(**)' --permission-allow 'Bash(go test:*)' \
+  --permission-deny  'Bash(rm -rf:*)'
+
+# Headless hard boundary (no human to pause for):
+iterion run bot.bot --permission deny --permission-allow 'Read(**)'
+```
+
+Environment: `ITERION_PERMISSION=ask|deny|off`.
+
+## How it works
+
+The resolved `permission.Policy` is carried on `delegate.Task.Permission`
+and evaluated by **both** backends before every tool runs:
+
+- **claw** — `executeToolsDirect` (pkg/backend/model/generation.go)
+  evaluates the policy before `gt.Execute`. Allow → execute; Deny → a
+  synthetic `isError` tool_result the model adapts to; Ask → the loop
+  aborts with `delegate.ErrAskUser` so the run pauses.
+- **claude_code** — a broad PreToolUse hook (`wirePermissionHook` in
+  claude_code.go) evaluates the policy. Under the always-on
+  `bypassPermissions`, PreToolUse hooks still run and a `deny` decision
+  still blocks the tool (Agent SDK order: hooks run first), so no
+  `--permission-mode` change is needed. Ask reuses the `ask_user`
+  capture-and-pause path.
+
+Both honour the **same** `permission.Policy`, so a bot behaves
+identically whichever backend executes it.
+
+## Status / limitations
+
+- **`off` and `deny` modes, and explicit `allow:`/`deny:` rules in any
+  mode, are fully deterministic** and need no human — the complete
+  anti-injection boundary for headless and cloud runs.
+- **`ask` mode** pauses the run (`paused_waiting_human`) and surfaces the
+  off-policy call to the operator, so nothing off-policy ever executes
+  silently. **Today, to let an asked-for action proceed, add an `allow:`
+  rule (or `--permission-allow`) and resume** — the frictionless
+  in-pause "approve once / approve always → auto-execute" round-trip
+  (operator buttons in the studio, grant persistence across resume) is
+  the next increment.
+- Studio surfaces the paused approval request through the existing
+  human-input UI; dedicated allow/deny buttons are part of the same
+  next increment.
+
+## See also
+
+- `pkg/backend/permission/` — the matcher + Policy (single source of truth)
+- `docs/rtk.md` — the sibling opt-in `rtk:` field this mirrors
+- Diagnostics: **C110** (invalid permission mode), **C111** (rules
+  declared but gate off).

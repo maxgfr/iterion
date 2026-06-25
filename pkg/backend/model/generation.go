@@ -13,6 +13,7 @@ import (
 	clawrt "github.com/SocialGouv/claw-code-go/pkg/runtime"
 
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
+	"github.com/SocialGouv/iterion/pkg/backend/permission"
 	"github.com/SocialGouv/iterion/pkg/backend/thinktokens"
 	"github.com/SocialGouv/iterion/pkg/internal/strutil"
 )
@@ -456,6 +457,7 @@ func executeToolsDirect(
 	onToolCall func(ToolCallInfo),
 	runner *hooks.Runner,
 	materialize func(string) string,
+	policy *permission.Policy,
 ) ([]api.ContentBlock, error) {
 	results := make([]api.ContentBlock, 0, len(toolUses))
 
@@ -532,6 +534,45 @@ func executeToolsDirect(
 				})
 			}
 			continue
+		}
+
+		// Permission gate (the anti-prompt-injection boundary). Evaluated
+		// AFTER the lifecycle hook (so hooks still observe every call) and
+		// BEFORE execution. Deny → a synthetic refusal tool_result the
+		// model can adapt to. Ask → abort the loop with an ErrAskUser so
+		// the run pauses for human approval (mirrors claude_code's
+		// PreToolUse permission hook for cross-backend parity). Allow falls
+		// through to execution. nil/disabled policy is a no-op.
+		if policy.Enabled() {
+			switch dec, rule := policy.Evaluate(tu.Name, hookInput); dec {
+			case permission.Deny:
+				reason := permission.DenyMessage(tu.Name, hookInput, rule)
+				results = append(results, api.ToolResult{
+					ToolUseID: tu.ID,
+					Content:   reason,
+					IsError:   true,
+				}.ToContentBlock())
+				if onToolCall != nil {
+					onToolCall(ToolCallInfo{
+						ToolName:  tu.Name,
+						InputSize: len(tu.PartialJSON),
+						ToolUseID: tu.ID,
+						Error:     errors.New(reason),
+					})
+				}
+				continue
+			case permission.Ask:
+				// Suspend the run for operator approval. The captured
+				// question guides the model after the operator answers
+				// (and grants), so on resume the re-issued call passes the
+				// now-updated gate. Stamp the pending tool_use ID exactly
+				// like the ask_user path below.
+				return results, &delegate.ErrAskUser{
+					Question:         permission.AskPrompt(tu.Name, hookInput, rule),
+					PendingToolUseID: tu.ID,
+				}
+			}
+			// permission.Allow falls through to execution.
 		}
 
 		if onToolStarted != nil {
@@ -862,7 +903,7 @@ func GenerateTextDirect(ctx context.Context, client api.APIClient, opts Generati
 		messages = append(messages, assistantToolUseMessage(agg.text, agg.toolUses))
 
 		// Execute tools and append tool_result message.
-		toolResults, toolErr := executeToolsDirect(ctx, agg.toolUses, toolMap, opts.OnToolStarted, opts.OnToolCall, opts.Hooks, opts.MaterializeSecrets)
+		toolResults, toolErr := executeToolsDirect(ctx, agg.toolUses, toolMap, opts.OnToolStarted, opts.OnToolCall, opts.Hooks, opts.MaterializeSecrets, opts.Permission)
 		if toolErr != nil {
 			// ErrAskUser (and any future suspension signal) bubbles up to
 			// the backend, which converts it into iterion's pause flow.

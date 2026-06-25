@@ -26,6 +26,10 @@ var runOpts struct {
 	sandboxDefaultImage string
 	sandboxHostState    string
 	rtk                 string
+	permission          string
+	permissionAllow     []string
+	permissionAsk       []string
+	permissionDeny      []string
 	maxCostUSD          float64
 	maxTokens           int
 	maxDuration         string
@@ -56,6 +60,10 @@ var runCmd = &cobra.Command{
 			SandboxDefaultImage: runOpts.sandboxDefaultImage,
 			SandboxHostState:    runOpts.sandboxHostState,
 			RTK:                 runOpts.rtk,
+			Permission:          runOpts.permission,
+			PermissionAllow:     runOpts.permissionAllow,
+			PermissionAsk:       runOpts.permissionAsk,
+			PermissionDeny:      runOpts.permissionDeny,
 			Budget: cli.BudgetOverrides{
 				MaxCostUSD:          runOpts.maxCostUSD,
 				MaxTokens:           runOpts.maxTokens,
@@ -95,6 +103,10 @@ func init() {
 	f.StringVar(&runOpts.sandboxDefaultImage, "sandbox-default-image", "", "Image ref used by sandbox: auto when no .devcontainer/devcontainer.json is found (env: ITERION_SANDBOX_DEFAULT_IMAGE; built-in: ghcr.io/socialgouv/iterion-sandbox-slim:<iterion-version>)")
 	f.StringVar(&runOpts.sandboxHostState, "sandbox-host-state", "", "Bind host ~/.iterion and ~/.claude into the sandbox so persistent memory survives across runs: \"auto\" (default) | \"none\". Empty inherits ITERION_SANDBOX_HOST_STATE then the built-in default \"auto\". Use \"none\" on multi-tenant/cloud runners to avoid leaking host OAuth credentials. See docs/sandbox.md.")
 	f.StringVar(&runOpts.rtk, "rtk", "", "rtk command-output compression (https://github.com/rtk-ai/rtk): \"on\" rewrites agent shell commands to their compact \"rtk <cmd>\" form, \"ultra\" uses rtk's densest output, \"off\" disables. Empty inherits the workflow/node rtk: DSL then ITERION_RTK. Needs the rtk binary on PATH (or ITERION_RTK_BIN). See docs/rtk.md.")
+	f.StringVar(&runOpts.permission, "permission", "", "tool-permission gate (anti-prompt-injection): \"ask\" pauses for human approval on any tool not allow-listed, \"deny\" hard-blocks it (headless), \"off\" disables. Empty inherits the workflow/node permission: DSL then ITERION_PERMISSION. See docs/permissions.md.")
+	f.StringArrayVar(&runOpts.permissionAllow, "permission-allow", nil, "permission allow rule (repeatable), Claude-Code syntax e.g. 'Bash(go test:*)', 'Read(**)', 'Edit(pkg/**)'. Auto-approved without prompting. Additive to the workflow allow: list.")
+	f.StringArrayVar(&runOpts.permissionAsk, "permission-ask", nil, "permission ask rule (repeatable): matching calls always pause for approval. Additive to the workflow ask: list.")
+	f.StringArrayVar(&runOpts.permissionDeny, "permission-deny", nil, "permission deny rule (repeatable): matching calls are always blocked, even in ask mode. Additive to the workflow deny: list.")
 	registerBudgetFlags(f, &runOpts.maxCostUSD, &runOpts.maxTokens, &runOpts.maxDuration, &runOpts.maxIterations, &runOpts.maxParallelBranches)
 	rootCmd.AddCommand(runCmd)
 }

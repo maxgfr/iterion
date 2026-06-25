@@ -362,6 +362,7 @@ type LLMDecl struct {
 	Sandbox           *SandboxBlock    // node-level sandbox override; nil inherits from workflow (see pkg/sandbox)
 	Cursors           *CursorBlock     // prompt-engineering cursor activations (nil = none)
 	RTK               string           // rtk output-compression mode: on|ultra|off ("" = inherit)
+	Permission        string           // permission gate mode override: off|ask|deny ("" = inherit workflow)
 }
 
 // AgentDecl represents an `agent <name>:` node declaration.
@@ -486,16 +487,17 @@ type HumanDecl struct {
 // workspace and executed by the interpreter named by `Language`).
 // Setting both is a validation error; setting neither is also an error.
 type ToolNodeDecl struct {
-	Name     string
-	Command  string        // command to execute, may contain ${...} env refs and {{...}} template refs
-	Script   string        // script body for higher-level interpreters (mutually exclusive with Command)
-	Language string        // interpreter selector for Script: js | py | sh | bash. Defaults to sh when empty.
-	Input    string        // optional input schema reference name
-	Output   string        // schema reference name
-	Publish  string        // persistent artifact name (empty if not set)
-	Await    AwaitMode     // convergence strategy (none/wait_all/best_effort)
-	Sandbox  *SandboxBlock // node-level sandbox override; nil inherits from workflow
-	RTK      string        // rtk output-compression mode: on|ultra|off ("" = inherit)
+	Name       string
+	Command    string        // command to execute, may contain ${...} env refs and {{...}} template refs
+	Script     string        // script body for higher-level interpreters (mutually exclusive with Command)
+	Language   string        // interpreter selector for Script: js | py | sh | bash. Defaults to sh when empty.
+	Input      string        // optional input schema reference name
+	Output     string        // schema reference name
+	Publish    string        // persistent artifact name (empty if not set)
+	Await      AwaitMode     // convergence strategy (none/wait_all/best_effort)
+	Sandbox    *SandboxBlock // node-level sandbox override; nil inherits from workflow
+	RTK        string        // rtk output-compression mode: on|ultra|off ("" = inherit)
+	Permission string        // permission gate mode override: off|ask|deny ("" = inherit workflow)
 
 	// Verified Action quad (ADR-044) — all optional; a tool node without
 	// these behaves exactly as before (recipe only, exit-code = success).
@@ -569,6 +571,10 @@ type WorkflowDecl struct {
 	Interaction    *InteractionMode  // workflow-level default interaction mode (nil = not set)
 	Worktree       string            // "auto" creates a per-run git worktree; "" or "none" runs in-place
 	RTK            string            // rtk output-compression mode: on|ultra|off ("" = unset)
+	Permission     string            // permission gate mode: off|ask|deny ("" = unset → off)
+	Allow          []string          // permission allow rules (Claude-Code `Tool(pattern)` syntax)
+	Ask            []string          // permission ask rules
+	Deny           []string          // permission deny rules
 	Sandbox        *SandboxBlock     // sandbox: short or block form (nil = inherit global default)
 	Edges          []*Edge           // directed edges between nodes
 	Span           Span

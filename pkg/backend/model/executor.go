@@ -21,6 +21,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/backend/delegate"
 	"github.com/SocialGouv/iterion/pkg/backend/detect"
 	"github.com/SocialGouv/iterion/pkg/backend/mcp"
+	"github.com/SocialGouv/iterion/pkg/backend/permission"
 	"github.com/SocialGouv/iterion/pkg/backend/rtk"
 	"github.com/SocialGouv/iterion/pkg/backend/secretguard"
 	"github.com/SocialGouv/iterion/pkg/backend/tool"
@@ -196,6 +197,23 @@ type ClawExecutor struct {
 	rtkOverride   string
 	rtkEnvDefault string
 
+	// Tool-permission gate (anti-prompt-injection boundary). wfPermission
+	// + wfPerm{Allow,Ask,Deny} are the workflow-level `permission:` DSL
+	// values; permOverride / permRuleOverride are the run-level CLI/studio
+	// override (--permission, --permission-allow/ask/deny); permEnvDefault
+	// is ITERION_PERMISSION read once at construction. Mode precedence:
+	// override > node DSL > workflow DSL > env > off. Rule lists are
+	// additive (workflow + override). See resolvePermissionPolicy.
+	wfPermission   string
+	wfPermAllow    []string
+	wfPermAsk      []string
+	wfPermDeny     []string
+	permOverride   string
+	permAllowRules []string
+	permAskRules   []string
+	permDenyRules  []string
+	permEnvDefault string
+
 	// sandbox is the live [sandbox.Run] for the current iterion run,
 	// or nil when the workflow doesn't activate a sandbox. The engine
 	// calls SetSandbox after the run starts; backends and tool nodes
@@ -318,6 +336,25 @@ func WithDefaultBackend(name string) ClawExecutorOption {
 // highest-priority input to rtk.Resolve.
 func WithRTKOverride(mode string) ClawExecutorOption {
 	return func(e *ClawExecutor) { e.rtkOverride = mode }
+}
+
+// WithPermissionOverride sets the run-level permission-gate override (CLI
+// --permission / studio Launch): off|ask|deny, or "" to defer to DSL/env.
+// Highest-priority input to the mode precedence (override > node > workflow
+// > env > off).
+func WithPermissionOverride(mode string) ClawExecutorOption {
+	return func(e *ClawExecutor) { e.permOverride = mode }
+}
+
+// WithPermissionRules adds run-level permission rules (CLI
+// --permission-allow / --permission-ask / --permission-deny). They are
+// additive on top of the workflow-level rule lists.
+func WithPermissionRules(allow, ask, deny []string) ClawExecutorOption {
+	return func(e *ClawExecutor) {
+		e.permAllowRules = append(e.permAllowRules, allow...)
+		e.permAskRules = append(e.permAskRules, ask...)
+		e.permDenyRules = append(e.permDenyRules, deny...)
+	}
 }
 
 // WithBotID sets the stable bot identity used to qualify structured
@@ -528,6 +565,11 @@ func NewClawExecutor(registry *Registry, wf *ir.Workflow, opts ...ClawExecutorOp
 		defaultBackend: wf.DefaultBackend,
 		wfRTK:          wf.RTK,
 		rtkEnvDefault:  os.Getenv(rtk.ModeEnv),
+		wfPermission:   wf.Permission,
+		wfPermAllow:    wf.PermissionAllow,
+		wfPermAsk:      wf.PermissionAsk,
+		wfPermDeny:     wf.PermissionDeny,
+		permEnvDefault: os.Getenv("ITERION_PERMISSION"),
 		wfCompaction:   wf.Compaction,
 		wfCapabilities: wf.Capabilities,
 		botID:          wf.Name,
@@ -937,6 +979,7 @@ type backendFields struct {
 	capabilities     []string
 	cursors          *ir.CursorInvocation
 	rtk              string // node-level `rtk:` value ("" = unset)
+	permission       string // node-level `permission:` mode override ("" = inherit)
 }
 
 // extractBackendFields normalises the LLM-relevant fields shared by
@@ -962,6 +1005,7 @@ func extractBackendFields(node ir.Node) (backendFields, error) {
 			capabilities:     n.Capabilities,
 			cursors:          n.Cursors,
 			rtk:              n.RTK,
+			permission:       n.Permission,
 		}, nil
 	case *ir.JudgeNode:
 		return backendFields{
@@ -978,10 +1022,43 @@ func extractBackendFields(node ir.Node) (backendFields, error) {
 			capabilities:     n.Capabilities,
 			cursors:          n.Cursors,
 			rtk:              n.RTK,
+			permission:       n.Permission,
 		}, nil
 	default:
 		return backendFields{}, fmt.Errorf("model: extractBackendFields called with unsupported node type %T", node)
 	}
+}
+
+// resolvePermissionPolicy builds the effective tool-permission policy for
+// a node. Mode precedence mirrors rtk (run override > node DSL > workflow
+// DSL > ITERION_PERMISSION env > off); the allow/ask/deny rule lists are
+// the union of the workflow-level lists and the run-level override lists.
+// Returns a disabled policy (mode off) when nothing opts in. A malformed
+// rule or unknown mode is an error (surfaced as a node execution error;
+// compile-time validation already flags these via C110/C111).
+func (e *ClawExecutor) resolvePermissionPolicy(nodeMode string) (*permission.Policy, error) {
+	modeStr := firstNonEmptyStr(e.permOverride, nodeMode, e.wfPermission, e.permEnvDefault)
+	mode, err := permission.ParseMode(modeStr)
+	if err != nil {
+		return nil, err
+	}
+	if mode == permission.ModeOff {
+		return &permission.Policy{}, nil
+	}
+	allow := append(append([]string(nil), e.wfPermAllow...), e.permAllowRules...)
+	ask := append(append([]string(nil), e.wfPermAsk...), e.permAskRules...)
+	deny := append(append([]string(nil), e.wfPermDeny...), e.permDenyRules...)
+	return permission.NewPolicy(mode, allow, ask, deny)
+}
+
+// firstNonEmptyStr returns the first non-empty string argument.
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // stampDelegateOutputMeta writes per-call observability keys onto the
@@ -1323,6 +1400,15 @@ func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFie
 	// carries it into its tool loop via ctx.
 	if m := rtk.Resolve(e.rtkOverride, f.rtk, e.wfRTK, e.rtkEnvDefault); m.Enabled() {
 		task.RTKMode = m.String()
+	}
+	// Tool-permission gate (precedence: run override > node DSL > workflow
+	// DSL > ITERION_PERMISSION env; off = no gate). Rule lists are additive
+	// (workflow + run override). The SAME resolved policy drives both the
+	// claude_code PreToolUse hook and the claw executeToolsDirect gate.
+	if pol, perr := e.resolvePermissionPolicy(f.permission); perr != nil {
+		return delegate.Task{}, fmt.Errorf("model: node %q: %w", f.id, perr)
+	} else if pol.Enabled() {
+		task.Permission = pol
 	}
 	e.applyMemorySpec(&task, f.memory)
 	task.CursorFragments = resolveCursorFragments(f.cursors, e.cursors)

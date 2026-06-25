@@ -17,27 +17,31 @@ import (
 // execute a workflow: resolved nodes, edges, schemas, prompts, vars,
 // loops and budget.
 type Workflow struct {
-	Name           string
-	Entry          string                 // entry node ID
-	Nodes          map[string]Node        // node ID → node
-	Edges          []*Edge                // ordered list of edges
-	Schemas        map[string]*Schema     // schema name → resolved schema
-	Prompts        map[string]*Prompt     // prompt name → resolved prompt
-	Vars           map[string]*Var        // var name → resolved variable
-	Secrets        map[string]*Secret     // secret name → resolved secret declaration
-	Presets        map[string]Preset      // preset name → resolved preset values (var name → typed value)
-	Attachments    map[string]*Attachment // attachment name → resolved attachment
-	Loops          map[string]*Loop       // loop name → loop definition
-	Budget         *Budget                // workflow budget (nil if not set)
-	Compaction     *Compaction            // workflow-level compaction overrides (nil = no override)
-	MCP            *MCPConfig             // workflow-level MCP activation/filtering
-	DefaultBackend string                 // workflow-level default backend (empty = not set)
-	ToolPolicy     []string               // workflow-level tool policy patterns (nil = open)
-	Capabilities   []string               // workflow-level default host capabilities (nil = inherit none)
-	Interaction    *InteractionMode       // workflow-level default interaction mode (nil = not set)
-	Worktree       string                 // "auto" runs in a per-run git worktree; "" or "none" runs in-place
-	RTK            string                 // rtk output-compression mode: on|ultra|off ("" = unset)
-	Sandbox        *SandboxSpec           // workflow-level sandbox spec (nil = inherit global / no sandbox)
+	Name            string
+	Entry           string                 // entry node ID
+	Nodes           map[string]Node        // node ID → node
+	Edges           []*Edge                // ordered list of edges
+	Schemas         map[string]*Schema     // schema name → resolved schema
+	Prompts         map[string]*Prompt     // prompt name → resolved prompt
+	Vars            map[string]*Var        // var name → resolved variable
+	Secrets         map[string]*Secret     // secret name → resolved secret declaration
+	Presets         map[string]Preset      // preset name → resolved preset values (var name → typed value)
+	Attachments     map[string]*Attachment // attachment name → resolved attachment
+	Loops           map[string]*Loop       // loop name → loop definition
+	Budget          *Budget                // workflow budget (nil if not set)
+	Compaction      *Compaction            // workflow-level compaction overrides (nil = no override)
+	MCP             *MCPConfig             // workflow-level MCP activation/filtering
+	DefaultBackend  string                 // workflow-level default backend (empty = not set)
+	ToolPolicy      []string               // workflow-level tool policy patterns (nil = open)
+	Capabilities    []string               // workflow-level default host capabilities (nil = inherit none)
+	Interaction     *InteractionMode       // workflow-level default interaction mode (nil = not set)
+	Worktree        string                 // "auto" runs in a per-run git worktree; "" or "none" runs in-place
+	RTK             string                 // rtk output-compression mode: on|ultra|off ("" = unset)
+	Permission      string                 // permission gate mode: off|ask|deny ("" = unset → off)
+	PermissionAllow []string               // allow rules (Claude-Code `Tool(pattern)` syntax, e.g. "Bash(go test:*)")
+	PermissionAsk   []string               // ask rules
+	PermissionDeny  []string               // deny rules
+	Sandbox         *SandboxSpec           // workflow-level sandbox spec (nil = inherit global / no sandbox)
 	// Cursors map of cursor name → resolved definition. Populated from
 	// top-level `cursor NAME:` declarations. Agent/judge `cursors:`
 	// invocations are resolved against this map at runtime.
@@ -159,6 +163,7 @@ type AgentNode struct {
 	Sandbox          *SandboxSpec // node-level sandbox override (nil = inherit workflow)
 	Cursors          *CursorInvocation
 	RTK              string // rtk output-compression mode: on|ultra|off ("" = inherit)
+	Permission       string // permission gate mode override: off|ask|deny ("" = inherit workflow)
 }
 
 // NodeKind implements Node.
@@ -184,6 +189,7 @@ type JudgeNode struct {
 	Sandbox          *SandboxSpec // node-level sandbox override (nil = inherit workflow)
 	Cursors          *CursorInvocation
 	RTK              string // rtk output-compression mode: on|ultra|off ("" = inherit)
+	Permission       string // permission gate mode override: off|ask|deny ("" = inherit workflow)
 }
 
 // NodeKind implements Node.
@@ -246,6 +252,7 @@ type ToolNode struct {
 	AwaitMode   AwaitMode
 	Sandbox     *SandboxSpec // node-level sandbox override (nil = inherit workflow)
 	RTK         string       // rtk output-compression mode: on|ultra|off ("" = inherit)
+	Permission  string       // permission gate mode override: off|ask|deny ("" = inherit workflow)
 
 	// Verified Action quad (ADR-044). All optional; a node with an empty
 	// Postcondition runs the recipe with exit-code = success (unchanged).
@@ -274,6 +281,11 @@ type RecoverySpec struct {
 
 // NodeKind implements Node.
 func (n *ToolNode) NodeKind() NodeKind { return NodeTool }
+
+// GetPermission returns the node-level permission gate mode override
+// ("" = inherit workflow). ToolNode does not implement LLMNode, but
+// exposes this accessor for symmetry with AgentNode/JudgeNode.
+func (n *ToolNode) GetPermission() string { return n.Permission }
 
 // ComputeNode evaluates a set of named expressions over the standard
 // reference namespaces (vars, input, outputs, artifacts, loop, run) and
@@ -351,6 +363,7 @@ type LLMNode interface {
 	GetMemory() *Memory
 	GetCursors() *CursorInvocation
 	GetRTK() string
+	GetPermission() string
 }
 
 var (
@@ -373,6 +386,7 @@ func (n *AgentNode) GetCompaction() *Compaction               { return n.Compact
 func (n *AgentNode) GetMemory() *Memory                       { return n.Memory }
 func (n *AgentNode) GetCursors() *CursorInvocation            { return n.Cursors }
 func (n *AgentNode) GetRTK() string                           { return n.RTK }
+func (n *AgentNode) GetPermission() string                    { return n.Permission }
 
 // LLMNode accessor methods on *JudgeNode.
 func (n *JudgeNode) GetLLMFields() *LLMFields                 { return &n.LLMFields }
@@ -389,6 +403,7 @@ func (n *JudgeNode) GetCompaction() *Compaction               { return n.Compact
 func (n *JudgeNode) GetMemory() *Memory                       { return n.Memory }
 func (n *JudgeNode) GetCursors() *CursorInvocation            { return n.Cursors }
 func (n *JudgeNode) GetRTK() string                           { return n.RTK }
+func (n *JudgeNode) GetPermission() string                    { return n.Permission }
 
 // ---------------------------------------------------------------------------
 // Node field accessors — exported helpers that extract fields from concrete

@@ -82,6 +82,15 @@ type RunOptions struct {
 	// DSL then the ITERION_RTK env default. It is the highest-priority
 	// input to rtk.Resolve. See docs/rtk.md.
 	RTK string
+	// Permission is the run-level tool-permission-gate mode override
+	// ("", "off", "ask", "deny"). "" inherits the workflow/node
+	// `permission:` DSL then the ITERION_PERMISSION env default.
+	// PermissionAllow/Ask/Deny are run-level rules, additive to the
+	// workflow-level lists. See docs/permissions.md.
+	Permission      string
+	PermissionAllow []string
+	PermissionAsk   []string
+	PermissionDeny  []string
 	// Budget carries CLI overrides for the workflow's budget: block
 	// (--max-cost-usd / --max-tokens / --max-duration / --max-iterations /
 	// --max-parallel-branches). Non-zero fields win over the DSL/recipe
@@ -315,13 +324,17 @@ func buildRunExecutor(
 		return opts.Executor, nil
 	}
 	execSpec := runview.ExecutorSpec{
-		Workflow: wf,
-		Vars:     opts.Vars,
-		Store:    s,
-		RunID:    runID,
-		Logger:   logger,
-		StoreDir: storeDir,
-		RTK:      opts.RTK,
+		Workflow:        wf,
+		Vars:            opts.Vars,
+		Store:           s,
+		RunID:           runID,
+		Logger:          logger,
+		StoreDir:        storeDir,
+		RTK:             opts.RTK,
+		Permission:      opts.Permission,
+		PermissionAllow: opts.PermissionAllow,
+		PermissionAsk:   opts.PermissionAsk,
+		PermissionDeny:  opts.PermissionDeny,
 	}
 	if exporter != nil {
 		execSpec.ExtraHooks = append(execSpec.ExtraHooks, exporter.EventHooks())

@@ -71,6 +71,16 @@ type ExecutorSpec struct {
 	// forwarded to the executor as the highest-priority input to
 	// rtk.Resolve (above node/workflow DSL and the ITERION_RTK env).
 	RTK string
+
+	// Permission is the run-level tool-permission-gate mode override
+	// ("", "off", "ask", "deny"), highest-priority input to the gate's
+	// mode precedence (above node/workflow DSL and ITERION_PERMISSION).
+	// PermissionAllow/Ask/Deny are run-level rules, additive to the
+	// workflow lists. See docs/permissions.md.
+	Permission      string
+	PermissionAllow []string
+	PermissionAsk   []string
+	PermissionDeny  []string
 }
 
 // BuildExecutor wires up the default ClawExecutor: registry, default
@@ -156,6 +166,8 @@ func BuildExecutor(spec ExecutorSpec) (*model.ClawExecutor, error) {
 		model.WithStoreDir(dispatcherStoreDir),
 		model.WithSecretGuard(guard),
 		model.WithRTKOverride(spec.RTK),
+		model.WithPermissionOverride(spec.Permission),
+		model.WithPermissionRules(spec.PermissionAllow, spec.PermissionAsk, spec.PermissionDeny),
 	}
 	if spec.BoardRegister != nil {
 		opts = append(opts, model.WithBoardRegister(spec.BoardRegister))

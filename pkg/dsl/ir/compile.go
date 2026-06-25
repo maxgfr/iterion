@@ -472,29 +472,33 @@ func (c *compiler) compile() *Workflow {
 	}
 
 	w := &Workflow{
-		Name:           wf.Name,
-		Entry:          wf.Entry,
-		DefaultBackend: wf.DefaultBackend,
-		ToolPolicy:     wf.ToolPolicy,
-		Capabilities:   wf.Capabilities,
-		Nodes:          c.nodes,
-		Edges:          edges,
-		Schemas:        c.schemas,
-		Prompts:        c.prompts,
-		Vars:           vars,
-		Secrets:        secrets,
-		Presets:        presets,
-		Attachments:    attachments,
-		Loops:          loops,
-		Budget:         budget,
-		Compaction:     compaction,
-		MCP:            convertMCPConfig(wf.MCP),
-		MCPServers:     c.mcp,
-		Cursors:        cursors,
-		Interaction:    interaction,
-		Worktree:       defaultWorktreeMode(wf.Worktree),
-		RTK:            wf.RTK,
-		Sandbox:        c.compileSandboxBlock(wf.Sandbox, "workflow", wf.Name),
+		Name:            wf.Name,
+		Entry:           wf.Entry,
+		DefaultBackend:  wf.DefaultBackend,
+		ToolPolicy:      wf.ToolPolicy,
+		Capabilities:    wf.Capabilities,
+		Nodes:           c.nodes,
+		Edges:           edges,
+		Schemas:         c.schemas,
+		Prompts:         c.prompts,
+		Vars:            vars,
+		Secrets:         secrets,
+		Presets:         presets,
+		Attachments:     attachments,
+		Loops:           loops,
+		Budget:          budget,
+		Compaction:      compaction,
+		MCP:             convertMCPConfig(wf.MCP),
+		MCPServers:      c.mcp,
+		Cursors:         cursors,
+		Interaction:     interaction,
+		Worktree:        defaultWorktreeMode(wf.Worktree),
+		RTK:             wf.RTK,
+		Permission:      wf.Permission,
+		PermissionAllow: wf.Allow,
+		PermissionAsk:   wf.Ask,
+		PermissionDeny:  wf.Deny,
+		Sandbox:         c.compileSandboxBlock(wf.Sandbox, "workflow", wf.Name),
 	}
 
 	// Compute each loop's body — the set of nodes that participate in
@@ -785,6 +789,7 @@ func (c *compiler) compileAgents() {
 			Sandbox:           c.compileSandboxBlock(a.Sandbox, "agent", a.Name),
 			Cursors:           compileCursorInvocation(a.Cursors),
 			RTK:               a.RTK,
+			Permission:        a.Permission,
 		}
 	}
 }
@@ -817,6 +822,7 @@ func (c *compiler) compileJudges() {
 			Sandbox:           c.compileSandboxBlock(j.Sandbox, "judge", j.Name),
 			Cursors:           compileCursorInvocation(j.Cursors),
 			RTK:               j.RTK,
+			Permission:        j.Permission,
 		}
 	}
 }
@@ -1091,6 +1097,7 @@ func (c *compiler) compileTools() {
 			AwaitMode:     t.Await,
 			Sandbox:       c.compileSandboxBlock(t.Sandbox, "tool", t.Name),
 			RTK:           t.RTK,
+			Permission:    t.Permission,
 			Goal:          t.Goal,
 			Postcondition: t.Postcondition,
 			PostcondRefs:  postcondRefs,

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SocialGouv/iterion/pkg/backend/permission"
 	"github.com/SocialGouv/iterion/pkg/sandbox"
 )
 
@@ -261,6 +262,15 @@ type Task struct {
 	// AllowedTools is the list of tool names the CLI agent may use.
 	// Used by CLI-based backends; API-based backends use ToolDefs instead.
 	AllowedTools []string
+
+	// Permission is the resolved tool-permission policy (the anti-
+	// prompt-injection gate). Nil or a disabled policy means no gate
+	// (today's bypassPermissions behaviour). When enabled, every tool
+	// call is evaluated by permission.Policy.Evaluate: allow → execute,
+	// deny → refuse, ask → pause the run and surface the call to the
+	// human. Both backends honour the SAME policy so claude_code and
+	// claw reach identical decisions. See pkg/backend/permission.
+	Permission *permission.Policy
 
 	// Capabilities are the host-side capability names granted to this node
 	// (e.g. "board.create", "board.read"). Backends wire them through to
