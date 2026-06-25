@@ -148,6 +148,9 @@ export interface RunHeader {
   bundle_display_name?: string;
   status: RunStatus;
   inputs?: Record<string, unknown>;
+  // Workflow-declared tool-permission gate mode ("off" | "ask" | "deny").
+  // Empty/off = no gate. The header badges ask/deny. See docs/permissions.md.
+  permission_mode?: string;
   created_at: string;
   updated_at: string;
   finished_at?: string;

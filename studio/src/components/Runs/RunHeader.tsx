@@ -2,7 +2,7 @@ import { errorMessage } from "@/lib/errorHints";
 import { downloadBlob } from "@/lib/download";
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { ClockIcon, Pencil1Icon, ResetIcon } from "@radix-ui/react-icons";
+import { ClockIcon, LockClosedIcon, Pencil1Icon, ResetIcon } from "@radix-ui/react-icons";
 
 import type { RunHeader as RunHeaderType } from "@/api/runs";
 import { cancelRun, getRun, loadEvents, pauseRun, renameRun } from "@/api/runs";
@@ -194,6 +194,20 @@ export default function RunHeader({ run, active, wsState, onResetLayout }: Props
             </div>
           )}
           <StatusBadge status={run.status} />
+          {(run.permission_mode === "ask" || run.permission_mode === "deny") && (
+            <Tooltip
+              content={
+                run.permission_mode === "ask"
+                  ? "Tool-permission gate: ask — tool calls outside the allow-list pause for your approval"
+                  : "Tool-permission gate: deny — tool calls outside the allow-list are blocked"
+              }
+            >
+              <span className="inline-flex items-center gap-1 rounded border border-warning/40 bg-warning-soft px-1.5 py-0.5 text-micro font-medium text-warning-fg">
+                <LockClosedIcon className="h-3 w-3" aria-hidden />
+                {run.permission_mode}
+              </span>
+            </Tooltip>
+          )}
           {active && (
             <LiveDot
               tone="live"

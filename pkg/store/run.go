@@ -91,6 +91,11 @@ type Run struct {
 	// caller having to re-supply it. Empty when no preset was selected
 	// or the workflow declares none.
 	Preset string `json:"preset,omitempty" bson:"preset,omitempty"`
+	// PermissionMode is the workflow-declared tool-permission gate mode
+	// ("" | "off" | "ask" | "deny") captured at launch, surfaced in the
+	// studio RunHeader so a gated run reads at a glance. See
+	// docs/permissions.md.
+	PermissionMode string `json:"permission_mode,omitempty" bson:"permission_mode,omitempty"`
 	// BundleHash is the SHA-256 of the uncompressed tar stream of the
 	// `.botz` archive backing this run. Used by resume to re-locate
 	// the same cache slot (and detect when the archive has changed

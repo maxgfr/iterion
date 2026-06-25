@@ -141,6 +141,47 @@ func TestNewPolicy_MalformedRule(t *testing.T) {
 	}
 }
 
+// TestIsInfrastructureTool_AllBackendSpellings guards the namespace
+// exemption against the cross-backend FQN spellings the registration sites
+// actually emit. If a new internal tool/server is added outside this set,
+// add its real registered name here — a failure means the gate would block
+// iterion's own plumbing (deadlocking `ask` mode).
+func TestIsInfrastructureTool_AllBackendSpellings(t *testing.T) {
+	exempt := []string{
+		// interaction (claw bare name + claude_code MCP FQN)
+		"ask_user", "mcp__iterion__ask_user", "send_user_message",
+		// board (claude_code double-underscore, claw single-underscore, dotted)
+		"mcp__iterion_board__board.create", "mcp_iterion_board_create",
+		"mcp.iterion_board.create",
+		// other internal MCP servers
+		"mcp__iterion_control__x", "__mcp-board",
+	}
+	for _, n := range exempt {
+		if !IsInfrastructureTool(n) {
+			t.Errorf("IsInfrastructureTool(%q) = false, want true (internal tool must be gate-exempt)", n)
+		}
+	}
+	// A real agent action must NOT be exempt, even if it mentions mcp.
+	for _, n := range []string{"Bash", "Edit", "mcp__github__create_issue", "mcp_slack_post"} {
+		if IsInfrastructureTool(n) {
+			t.Errorf("IsInfrastructureTool(%q) = true, want false (third-party/agent tool must be gated)", n)
+		}
+	}
+}
+
+func TestMarkExempt(t *testing.T) {
+	p := mustPolicy(t, ModeAsk, nil, nil, nil)
+	// A bare custom internal tool outside the namespace is gated by default…
+	if dec, _ := p.Evaluate("my_internal_tool", nil); dec != Ask {
+		t.Fatalf("pre-mark = %v, want Ask", dec)
+	}
+	// …until the runtime marks it exempt.
+	p.MarkExempt("my_internal_tool")
+	if dec, _ := p.Evaluate("my_internal_tool", nil); dec != Allow {
+		t.Errorf("post-mark = %v, want Allow", dec)
+	}
+}
+
 func TestAddAllowRule_AllowAlways(t *testing.T) {
 	p := mustPolicy(t, ModeAsk, nil, nil, nil)
 	if got, _ := p.Evaluate("Bash", map[string]any{"command": "go build"}); got != Ask {

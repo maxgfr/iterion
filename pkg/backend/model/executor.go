@@ -1424,6 +1424,15 @@ func (e *ClawExecutor) buildTask(ctx context.Context, node ir.Node, f backendFie
 	}
 	e.applyBoardEndpoint(&task, effectiveCaps)
 
+	// Mark the tools the runtime opened for its OWN interaction/capability
+	// plumbing as gate-exempt (registration-linked, so a future internal
+	// tool can't accidentally be gated). The reserved-namespace check is a
+	// backstop. nil/disabled policy → no-op.
+	if task.Permission.Enabled() {
+		task.Permission.MarkExempt(askUserToolName, "send_user_message")
+		task.Permission.MarkExempt(delegate.BoardToolsFor(effectiveCaps)...)
+	}
+
 	// Resolve full tool definitions for backends that manage tool loops
 	// internally (claw). CLI-based backends (claude_code, codex) handle tools
 	// natively via AllowedTools and do not need ToolDefs.

@@ -687,6 +687,11 @@ func (e *Engine) runResolveDoc(ctx context.Context, runID string, inputs map[str
 		if e.preset != "" {
 			run.Preset = e.preset
 		}
+		// Persist the workflow-declared tool-permission mode so the studio
+		// RunHeader can badge a gated run (off|ask|deny). This is the bot's
+		// declared posture; a run-level --permission override refines it per
+		// node but isn't reflected here.
+		run.PermissionMode = e.workflow.Permission
 		if e.bundle != nil {
 			run.BundleHash = e.bundle.Hash
 			run.BundlePath = e.bundle.SourcePath

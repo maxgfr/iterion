@@ -110,6 +110,11 @@ type Policy struct {
 	ask    []rule
 	deny   []rule
 	scoped bool // any rule has an (arg) pattern → Evaluate must summarize
+	// exempt is the set of tool names the runtime explicitly marked as its
+	// own infrastructure (registration-linked, in addition to the reserved
+	// MCP namespace IsInfrastructureTool recognises). Keyed by canonical
+	// name. See MarkExempt.
+	exempt map[string]bool
 }
 
 // NewPolicy parses the rule strings into a Policy. A malformed rule is
@@ -178,6 +183,38 @@ func (p *Policy) AddAllowRule(raw string) {
 	}
 }
 
+// MarkExempt records tool names the runtime opened for its own
+// interaction/capability plumbing, so the gate never blocks them. This is
+// the registration-linked half of the exemption: the executor calls it
+// with the exact infra tools it wired for a node (ask_user, board.*),
+// rather than the permission package re-deriving the set from naming
+// conventions it doesn't own. The reserved-namespace check in
+// IsInfrastructureTool remains as a backend-agnostic backstop.
+func (p *Policy) MarkExempt(names ...string) {
+	if p == nil {
+		return
+	}
+	for _, n := range names {
+		if strings.TrimSpace(n) == "" {
+			continue
+		}
+		if p.exempt == nil {
+			p.exempt = make(map[string]bool)
+		}
+		p.exempt[canonicalToolName(n)] = true
+	}
+}
+
+// isExempt reports whether a tool call must bypass the gate — either the
+// runtime explicitly marked it (MarkExempt) or it lives in iterion's
+// reserved MCP namespace (IsInfrastructureTool).
+func (p *Policy) isExempt(toolName string) bool {
+	if p.exempt[canonicalToolName(toolName)] {
+		return true
+	}
+	return IsInfrastructureTool(toolName)
+}
+
 // Evaluate decides what to do with a tool call. Precedence mirrors
 // Claude Code's evaluation order (deny rules → ask rules → allow rules
 // → permission mode):
@@ -198,7 +235,7 @@ func (p *Policy) Evaluate(toolName string, input map[string]any) (Decision, stri
 	// control, watch) is infrastructure, not an agent action against the
 	// environment — never gate it, or `ask` mode would pause on the very
 	// tool used to ask the human. Same exemption on both backends.
-	if IsInfrastructureTool(toolName) {
+	if p.isExempt(toolName) {
 		return Allow, ""
 	}
 	canon := canonicalToolName(toolName)
@@ -405,18 +442,31 @@ func str(m map[string]any, key string) string {
 // families, and the iterion-internal __mcp-* servers. Exported so the
 // resume path can tell a real ask_user pause from a permission pause.
 func IsInfrastructureTool(name string) bool {
-	n := strings.ToLower(strings.TrimSpace(name))
-	switch n {
+	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "ask_user", "askuser", "send_user_message":
 		return true
 	}
-	if strings.HasPrefix(n, "mcp__iterion") || strings.HasPrefix(n, "mcp_iterion") {
-		return true
+	// Match iterion's reserved MCP namespace regardless of the separator
+	// spelling a backend uses for the FQN — claude_code double-underscore
+	// (mcp__iterion_board__create), claw single-underscore
+	// (mcp_iterion_board_create), and dotted (mcp.iterion_board.create) all
+	// normalise to the same `mcp_iterion…` form. Keying on the namespace
+	// (a structural invariant every internal server upholds) rather than an
+	// exact-name list is what makes the exemption robust across backends.
+	n := normalizeMCPName(name)
+	return strings.HasPrefix(n, "mcp_iterion") || strings.HasPrefix(n, "_mcp")
+}
+
+// normalizeMCPName lower-cases a tool name and collapses MCP separator
+// variants (`__`, `.`) to single underscores so the iterion namespace can
+// be recognised in any backend's spelling.
+func normalizeMCPName(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	n = strings.ReplaceAll(n, ".", "_")
+	for strings.Contains(n, "__") {
+		n = strings.ReplaceAll(n, "__", "_")
 	}
-	if strings.HasPrefix(n, "__mcp") {
-		return true
-	}
-	return false
+	return n
 }
 
 // canonicalToolName maps a backend-specific tool name to a stable key
