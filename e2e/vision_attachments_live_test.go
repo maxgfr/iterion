@@ -58,7 +58,7 @@ func TestLive_VisionAttachments(t *testing.T) {
 		}
 	}
 
-	wf := compileFixture(t, "vision_attachments.iter")
+	wf := compileFixture(t, "vision_attachments.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-vision-attachments-*")
 	if err != nil {

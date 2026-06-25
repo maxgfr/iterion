@@ -15,11 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestFixtures(t *testing.T) {
-	// Top-level standalone .iter / .bot recipes.
-	iterFixtures, err := filepath.Glob("../../../examples/*.iter")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Top-level standalone .bot recipes.
 	botFixtures, err := filepath.Glob("../../../examples/*.bot")
 	if err != nil {
 		t.Fatal(err)
@@ -27,14 +23,13 @@ func TestFixtures(t *testing.T) {
 	// Bundle workflows: examples/<name>/main.bot. Every productised bot
 	// now lives in its own folder (feature_dev, whole_improve_loop,
 	// secured-renovacy, …) — the parser test walks these so dropping a
-	// standalone .iter into a bundle doesn't silently remove the recipe
+	// standalone .bot into a bundle doesn't silently remove the recipe
 	// from the regression suite.
 	bundleMains, err := filepath.Glob("../../../examples/*/main.bot")
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixtures := append(iterFixtures, botFixtures...)
-	fixtures = append(fixtures, bundleMains...)
+	fixtures := append(botFixtures, bundleMains...)
 	if len(fixtures) == 0 {
 		t.Fatal("no workflow fixtures found in ../examples/")
 	}
@@ -61,8 +56,8 @@ func TestFixtures(t *testing.T) {
 
 // TestFixturePRRefineSingleModel validates detailed AST structure.
 func TestFixturePRRefineSingleModel(t *testing.T) {
-	src := readFixture(t, "../testdata/pr_refine_single_model.iter")
-	res := parser.Parse("pr_refine_single_model.iter", src)
+	src := readFixture(t, "../testdata/pr_refine_single_model.bot")
+	res := parser.Parse("pr_refine_single_model.bot", src)
 	assertNoDiags(t, res)
 
 	f := res.File
@@ -127,8 +122,8 @@ func TestFixturePRRefineSingleModel(t *testing.T) {
 
 // TestFixtureCIFixUntilGreen validates the CI fix fixture structure.
 func TestFixtureCIFixUntilGreen(t *testing.T) {
-	src := readFixture(t, "../testdata/ci_fix_until_green.iter")
-	res := parser.Parse("ci_fix_until_green.iter", src)
+	src := readFixture(t, "../testdata/ci_fix_until_green.bot")
+	res := parser.Parse("ci_fix_until_green.bot", src)
 	assertNoDiags(t, res)
 
 	f := res.File
@@ -158,8 +153,8 @@ func TestFixtureCIFixUntilGreen(t *testing.T) {
 
 // TestFixtureRecipeBenchmark validates router/join/fan-out patterns.
 func TestFixtureRecipeBenchmark(t *testing.T) {
-	src := readFixture(t, "../testdata/recipe_benchmark.iter")
-	res := parser.Parse("recipe_benchmark.iter", src)
+	src := readFixture(t, "../testdata/recipe_benchmark.bot")
+	res := parser.Parse("recipe_benchmark.bot", src)
 	assertNoDiags(t, res)
 
 	f := res.File
@@ -186,7 +181,7 @@ func TestMinimalAgent(t *testing.T) {
   user: usr_prompt
   session: fresh
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	if len(res.File.Agents) != 1 {
@@ -204,7 +199,7 @@ func TestMinimalWorkflow(t *testing.T) {
 
   start -> done
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	wf := res.File.Workflows[0]
@@ -222,7 +217,7 @@ func TestPromptBody(t *testing.T) {
   Bonjour {{input.name}},
   Comment allez-vous ?
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	if len(res.File.Prompts) != 1 {
@@ -249,7 +244,7 @@ func TestPromptBodyRecoveryDiagnostic(t *testing.T) {
   Comment allez-vous ?
 not_a_prompt_line:
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if !hasDiagCode(res, parser.DiagUnexpectedToken) && !hasDiagCode(res, parser.DiagExpectedToken) {
 		t.Fatal("expected DiagUnexpectedToken or DiagExpectedToken once the prompt block dedents into a malformed top-level token")
 	}
@@ -260,7 +255,7 @@ func TestSchemaWithEnum(t *testing.T) {
   approved: bool
   confidence: string [enum: "low", "medium", "high"]
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	s := res.File.Schemas[0]
@@ -282,7 +277,7 @@ func TestVarsWithDefaults(t *testing.T) {
   rate: float = 3.14
   debug: bool = false
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	vb := res.File.Vars
@@ -300,7 +295,7 @@ func TestAttachmentsBlock_Short(t *testing.T) {
   logo: image
   spec: file
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	ab := res.File.Attachments
@@ -320,7 +315,7 @@ func TestAttachmentsBlock_FullProps(t *testing.T) {
     accept_mime: ["application/pdf", "text/markdown"]
     required: true
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	ab := res.File.Attachments
@@ -344,7 +339,7 @@ func TestAttachmentsBlock_WorkflowLevel(t *testing.T) {
     logo: image
   entry: done
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	wd := res.File.Workflows[0]
@@ -363,7 +358,7 @@ func TestEdgeWithAllClauses(t *testing.T) {
     key2: "{{vars.x}}"
   }
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	e := res.File.Workflows[0].Edges[0]
@@ -400,7 +395,7 @@ func TestEdgeLoopTemplatedCap(t *testing.T) {
 
   a -> b as fix_loop("{{outputs.select.cap}}")
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	e := res.File.Workflows[0].Edges[0]
@@ -418,7 +413,7 @@ func TestEdgeWhenNot(t *testing.T) {
 
   a -> b when not approved
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	e := res.File.Workflows[0].Edges[0]
@@ -433,7 +428,7 @@ func TestToolNode(t *testing.T) {
   command: "${CI_COMMAND}"
   output: ci_result
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	td := res.File.Tools[0]
@@ -448,7 +443,7 @@ func TestToolNodeWithInput(t *testing.T) {
   input: commit_input
   output: commit_result
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	td := res.File.Tools[0]
@@ -463,7 +458,7 @@ func TestToolNodeWithScript(t *testing.T) {
 		"  language: js\n" +
 		"  script: `console.log(JSON.stringify({ok: true}))`\n" +
 		"  output: result\n"
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	td := res.File.Tools[0]
@@ -480,7 +475,7 @@ func TestToolNodeBlockScalarScript(t *testing.T) {
 		"    const fs = require('fs')\n" +
 		"    console.log('hello')\n" +
 		"  output: result\n"
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	td := res.File.Tools[0]
@@ -493,7 +488,7 @@ func TestRouterDecl(t *testing.T) {
 	src := `router dispatch:
   mode: condition
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	r := res.File.Routers[0]
@@ -504,7 +499,7 @@ func TestRouterDeclRoundRobin(t *testing.T) {
 	src := `router selector:
   mode: round_robin
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	r := res.File.Routers[0]
@@ -518,7 +513,7 @@ func TestRouterDeclLLMWithBackend(t *testing.T) {
   backend: "claude_code"
   system: my_prompt
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	r := res.File.Routers[0]
@@ -536,7 +531,7 @@ func TestHumanDecl(t *testing.T) {
   interaction: human
   min_answers: 2
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	h := res.File.Humans[0]
@@ -555,7 +550,7 @@ func TestAgentWithTools(t *testing.T) {
   tools: [read_file, write_file, git_diff]
   tool_max_steps: 15
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	a := res.File.Agents[0]
@@ -573,7 +568,7 @@ func TestAgentMaxTokens(t *testing.T) {
   user: usr
   max_tokens: 2048
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	a := res.File.Agents[0]
@@ -587,7 +582,7 @@ func TestJudgeMaxTokens(t *testing.T) {
   user: usr
   max_tokens: 1024
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	j := res.File.Judges[0]
@@ -604,7 +599,7 @@ func TestAgentSessionFork(t *testing.T) {
   user: usr
   session: fork
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	a := res.File.Agents[0]
@@ -617,7 +612,7 @@ func TestAgentReasoningEffort(t *testing.T) {
   model: "claude-4"
   reasoning_effort: high
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 	assertEq(t, "ReasoningEffort", res.File.Agents[0].ReasoningEffort, "high")
 }
@@ -627,7 +622,7 @@ func TestAgentReasoningEffortXHigh(t *testing.T) {
   model: "claude-4"
   reasoning_effort: xhigh
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 	assertEq(t, "ReasoningEffort", res.File.Agents[0].ReasoningEffort, "xhigh")
 }
@@ -637,7 +632,7 @@ func TestAgentReasoningEffortMax(t *testing.T) {
   model: "claude-4"
   reasoning_effort: max
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 	assertEq(t, "ReasoningEffort", res.File.Agents[0].ReasoningEffort, "max")
 }
@@ -647,7 +642,7 @@ func TestJudgeReasoningEffort(t *testing.T) {
   model: "claude-4"
   reasoning_effort: low
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 	assertEq(t, "ReasoningEffort", res.File.Judges[0].ReasoningEffort, "low")
 }
@@ -657,7 +652,7 @@ func TestReasoningEffortInvalid(t *testing.T) {
   model: "claude-4"
   reasoning_effort: ultra
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if len(res.Diagnostics) == 0 {
 		t.Fatal("expected diagnostic for invalid reasoning_effort")
 	}
@@ -668,7 +663,7 @@ func TestAgentReasoningEffortEnvSubst(t *testing.T) {
   model: "claude-4"
   reasoning_effort: "${VIBE_EFFORT:-max}"
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 	assertEq(t, "ReasoningEffort", res.File.Agents[0].ReasoningEffort, "${VIBE_EFFORT:-max}")
 }
@@ -678,7 +673,7 @@ func TestAgentReasoningEffortEnvSubstBare(t *testing.T) {
   model: "claude-4"
   reasoning_effort: "${VIBE_EFFORT}"
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 	assertEq(t, "ReasoningEffort", res.File.Agents[0].ReasoningEffort, "${VIBE_EFFORT}")
 }
@@ -693,7 +688,7 @@ agent x:
   user: u
   session: fresh
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 	if len(res.File.Comments) != 1 {
 		t.Fatalf("expected 1 comment, got %d", len(res.File.Comments))
@@ -708,7 +703,7 @@ func TestCompactionBlockWorkflow(t *testing.T) {
     preserve_recent: 8
   a -> done
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	c := res.File.Workflows[0].Compaction
@@ -735,7 +730,7 @@ func TestCompactionBlockAgent(t *testing.T) {
     threshold: 0.95
     preserve_recent: 12
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	c := res.File.Agents[0].Compaction
@@ -761,7 +756,7 @@ func TestBudgetBlock(t *testing.T) {
     max_iterations: 10
   a -> done
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	b := res.File.Workflows[0].Budget
@@ -783,7 +778,7 @@ func TestWorkflowVars(t *testing.T) {
   entry: a
   a -> done
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	wv := res.File.Workflows[0].Vars
@@ -810,7 +805,7 @@ func TestDiagReservedName(t *testing.T) {
   user: u
   session: fresh
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if !hasDiagCode(res, parser.DiagReservedName) {
 		t.Error("expected DiagReservedName for agent named 'done'")
 	}
@@ -825,7 +820,7 @@ func TestDiagBadIndentation(t *testing.T) {
   user: u
   session: fresh
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	// 3-space indent should produce an indentation error
 	if !hasDiagCode(res, parser.DiagBadIndentation) && !hasDiagCode(res, parser.DiagExpectedToken) && !hasDiagCode(res, parser.DiagUnexpectedToken) {
 		// The lexer emits TokenError for bad indentation which the parser sees
@@ -847,7 +842,7 @@ func TestDiagUnknownProperty(t *testing.T) {
   session: fresh
   foobar: baz
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if !hasDiagCode(res, parser.DiagUnknownProperty) {
 		t.Error("expected DiagUnknownProperty for 'foobar'")
 	}
@@ -862,7 +857,7 @@ func TestDiagInvalidSessionMode(t *testing.T) {
   user: u
   session: invalid_mode
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if !hasDiagCode(res, parser.DiagInvalidValue) {
 		t.Error("expected DiagInvalidValue for invalid session mode")
 	}
@@ -872,7 +867,7 @@ func TestDiagInvalidType(t *testing.T) {
 	src := `vars:
   x: foobar
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if !hasDiagCode(res, parser.DiagInvalidType) {
 		t.Error("expected DiagInvalidType for unknown type 'foobar'")
 	}
@@ -881,7 +876,7 @@ func TestDiagInvalidType(t *testing.T) {
 func TestDiagUnexpectedTopLevel(t *testing.T) {
 	src := `12345
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if len(res.Diagnostics) == 0 {
 		t.Error("expected diagnostic for unexpected top-level token")
 	}
@@ -913,7 +908,7 @@ attachments:
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res := parser.Parse("test.iter", tc.src)
+			res := parser.Parse("test.bot", tc.src)
 			if !hasDiagCode(res, parser.DiagDuplicateBlock) {
 				t.Fatalf("expected DiagDuplicateBlock for duplicate %s, got diags=%v", tc.name, res.Diagnostics)
 			}
@@ -940,7 +935,7 @@ workflow w:
   entry: c
   c -> done
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	assertEq(t, "schemas", len(res.File.Schemas), 2)
@@ -957,7 +952,7 @@ func TestAllFieldTypes(t *testing.T) {
   e: json
   f: string[]
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	fields := res.File.Schemas[0].Fields
@@ -980,7 +975,7 @@ func TestLexerBasic(t *testing.T) {
 	src := `agent foo:
   model: "gpt-4"
 `
-	lex := parser.NewLexer("test.iter", src)
+	lex := parser.NewLexer("test.bot", src)
 	tokens := lex.All()
 
 	// Verify key tokens are present
@@ -1020,7 +1015,7 @@ func TestLexerIndentDedent(t *testing.T) {
   d
 e
 `
-	lex := parser.NewLexer("test.iter", src)
+	lex := parser.NewLexer("test.bot", src)
 	tokens := lex.All()
 
 	var types []parser.TokenType
@@ -1054,7 +1049,7 @@ func TestLexerPromptMode(t *testing.T) {
 agent foo:
   model: "m"
 `
-	lex := parser.NewLexer("test.iter", src)
+	lex := parser.NewLexer("test.bot", src)
 	tokens := lex.All()
 
 	promptLines := 0
@@ -1073,7 +1068,7 @@ func TestLexerComment(t *testing.T) {
 agent foo:
   model: "m"
 `
-	lex := parser.NewLexer("test.iter", src)
+	lex := parser.NewLexer("test.bot", src)
 	tokens := lex.All()
 
 	found := false
@@ -1129,7 +1124,7 @@ func assertEq[T comparable](t *testing.T, label string, got, want T) {
 
 // Verify fixtures produce stable AST (re-parsing produces identical structure).
 func TestFixtureStability(t *testing.T) {
-	fixtures, err := filepath.Glob("../../../examples/*.iter")
+	fixtures, err := filepath.Glob("../../../examples/*.bot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1181,7 +1176,7 @@ func TestAgentBackend(t *testing.T) {
   tools: [read_file, write_file]
   tool_max_steps: 10
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	a := res.File.Agents[0]
@@ -1201,7 +1196,7 @@ func TestJudgeBackend(t *testing.T) {
   user: usr
   session: fresh
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	j := res.File.Judges[0]
@@ -1222,7 +1217,7 @@ func TestAgentProvider(t *testing.T) {
   user: usr
   session: fresh
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	a := res.File.Agents[0]
@@ -1244,7 +1239,7 @@ func TestJudgeProviderTemplated(t *testing.T) {
   user: usr
   session: fresh
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	j := res.File.Judges[0]
@@ -1263,7 +1258,7 @@ func TestRouterLLMProvider(t *testing.T) {
   system: sys
   user: usr
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	r := res.File.Routers[0]
@@ -1281,7 +1276,7 @@ func TestDottedToolNames(t *testing.T) {
   tools: [git_diff, mcp.claude_code.search, mcp.falcon.lookup]
   tool_max_steps: 5
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	a := res.File.Agents[0]
@@ -1303,7 +1298,7 @@ func TestWildcardToolRef(t *testing.T) {
   session: fresh
   tools: [mcp.claude_code.*, git_diff, mcp.codex.*]
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	a := res.File.Agents[0]
@@ -1320,7 +1315,7 @@ func TestMCPServerDecl(t *testing.T) {
   transport: http
   url: "https://api.githubcopilot.com/mcp"
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	if len(res.File.MCPServers) != 1 {
@@ -1344,7 +1339,7 @@ func TestMCPServerAuthBlock(t *testing.T) {
     scopes: ["repo", "read:org"]
     revoke_url: "https://github.com/login/oauth/revoke"
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	if len(res.File.MCPServers) != 1 {
@@ -1373,7 +1368,7 @@ func TestMCPServerAuthUnknownProperty(t *testing.T) {
     type: "oauth2"
     bogus: "x"
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if len(res.Diagnostics) == 0 {
 		t.Fatal("expected diagnostic for unknown auth property")
 	}
@@ -1414,7 +1409,7 @@ workflow flow:
   implement -> review
   review -> done
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	wf := res.File.Workflows[0]
@@ -1487,7 +1482,7 @@ func TestLexerRawString(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			lex := parser.NewLexer("test.iter", c.in)
+			lex := parser.NewLexer("test.bot", c.in)
 			tok := lex.Next()
 			if tok.Type != parser.TokenString {
 				t.Fatalf("type = %v, want TokenString", tok.Type)
@@ -1500,7 +1495,7 @@ func TestLexerRawString(t *testing.T) {
 }
 
 func TestLexerRawStringUnterminated(t *testing.T) {
-	lex := parser.NewLexer("test.iter", "`no closing backtick")
+	lex := parser.NewLexer("test.bot", "`no closing backtick")
 	tok := lex.Next()
 	if tok.Type != parser.TokenError {
 		t.Fatalf("type = %v, want TokenError", tok.Type)
@@ -1540,7 +1535,7 @@ func TestLexerStrictEscape(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			lex := parser.NewLexer("test.iter", c.src)
+			lex := parser.NewLexer("test.bot", c.src)
 			// Pull tokens until we find a TokenString
 			var got parser.Token
 			for {
@@ -1564,7 +1559,7 @@ func TestLexerStrictEscape(t *testing.T) {
 }
 
 func TestLexerStrictEscapeUnknown(t *testing.T) {
-	lex := parser.NewLexer("test.iter", "## strict-escape: on\n\"oops \\x\"")
+	lex := parser.NewLexer("test.bot", "## strict-escape: on\n\"oops \\x\"")
 	for {
 		tk := lex.Next()
 		if tk.Type == parser.TokenError {
@@ -1610,7 +1605,7 @@ func TestLexerBlockScalar(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			lex := parser.NewLexer("test.iter", c.src)
+			lex := parser.NewLexer("test.bot", c.src)
 			var got parser.Token
 			seenString := false
 			for {
@@ -1641,7 +1636,7 @@ func TestLexerBlockScalar(t *testing.T) {
 // seeing well-formed token shape afterwards.
 func TestLexerBlockScalarTerminatedByDedent(t *testing.T) {
 	src := "tool foo:\n  command: |\n    echo hi\n  input: bar\n"
-	lex := parser.NewLexer("test.iter", src)
+	lex := parser.NewLexer("test.bot", src)
 	var strings []string
 	for {
 		tk := lex.Next()
@@ -1663,7 +1658,7 @@ func TestLexerBlockScalarTerminatedByDedent(t *testing.T) {
 // TestLexerBlockScalarBareError ensures a stray `|` outside a value
 // position is a lex error (not a silent block scalar).
 func TestLexerBlockScalarBareError(t *testing.T) {
-	lex := parser.NewLexer("test.iter", "| stray")
+	lex := parser.NewLexer("test.bot", "| stray")
 	for {
 		tk := lex.Next()
 		if tk.Type == parser.TokenError {

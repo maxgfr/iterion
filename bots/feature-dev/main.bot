@@ -31,7 +31,7 @@
 ##   - new prompts plan_system/plan_user/act_system/act_user/simplify_user
 ##     (English, imperative, mirroring Claude Code's plan-mode tone)
 ##   - new agent nodes plan/act/simplify wired with session inheritance
-##     (pattern from rust_to_go_port.iter:1008-1015)
+##     (pattern from rust_to_go_port.bot:1008-1015)
 ##   - entry node is `plan` (was `alt`)
 ##   - simplify → alt edge feeds the existing review/fix loop
 ##   - bumped budget (4h / $120) to absorb the dev phase
@@ -1087,7 +1087,7 @@ workflow feature_dev:
   ## `session: inherit` on act/simplify. Plan emits text only;
   ## act executes the plan in the same conversation; simplify
   ## invokes the native /simplify skill on the freshly-modified
-  ## code. The pattern mirrors rust_to_go_port.iter:1008-1015.
+  ## code. The pattern mirrors rust_to_go_port.bot:1008-1015.
   plan -> act with {
     _session_id: "{{outputs.plan._session_id}}"
   }

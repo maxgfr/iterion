@@ -12,7 +12,7 @@ no model to download, no Python, no setup.
   drafting).
 
 Both are regular tool registrations, so they work as `tool` nodes in
-`.iter` workflows and as tools attached to Agent nodes. They obey the
+`.bot` workflows and as tools attached to Agent nodes. They obey the
 recipe `tool_policy` allowlist like any other tool.
 
 ## Detection backend

@@ -24,7 +24,7 @@ workflow w:
   po -> qa
   qa -> done
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if len(res.Diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %+v", res.Diagnostics)
 	}
@@ -41,7 +41,7 @@ workflow w:
 	}
 
 	// Reparse the unparsed output; must produce equivalent capability lists.
-	res2 := parser.Parse("test.iter", out)
+	res2 := parser.Parse("test.bot", out)
 	if len(res2.Diagnostics) != 0 {
 		t.Fatalf("reparse diagnostics: %+v\nsource:\n%s", res2.Diagnostics, out)
 	}

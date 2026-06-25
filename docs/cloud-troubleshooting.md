@@ -109,7 +109,7 @@ Fix:
 
 Diagnose:
 1. `iterion inspect --run-id <id> --events | grep -E 'budget|cost'`
-2. Inspect the `.iter` source's `budget:` block.
+2. Inspect the `.bot` source's `budget:` block.
 
 Fix:
 - Raise the workflow source's `budget:` block (`max_cost_usd` / `max_tokens`) and resume the run; iterion has no per-run CLI override for these caps.
@@ -124,7 +124,7 @@ Diagnose:
 2. `iterion validate <workflow.bot>` — confirm node IDs match what `--judge-node` expects.
 
 Fix:
-- Pass the right node ID. The IR node ID is the value after `judge` / `agent` in the `.iter` source (e.g. `judge reviewer:` → `--judge-node reviewer`).
+- Pass the right node ID. The IR node ID is the value after `judge` / `agent` in the `.bot` source (e.g. `judge reviewer:` → `--judge-node reviewer`).
 - If your workflow has no bounded loop (no `-> as loop_name(N)` edges), the bench has nothing to iterate over. Add a loop or measure a different recipe.
 
 ### Trivy CI reports a HIGH CVE

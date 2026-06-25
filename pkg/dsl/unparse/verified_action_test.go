@@ -8,7 +8,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/unparse"
 )
 
-// The Verified Action quad (ADR-044) must survive an IR→.iter round-trip so
+// The Verified Action quad (ADR-044) must survive an IR→.bot round-trip so
 // `iterion resume` change-detection hashing stays correct.
 func TestUnparseVerifiedAction_RoundTrip(t *testing.T) {
 	src := `tool commit_changes:
@@ -26,7 +26,7 @@ workflow w:
   entry: commit_changes
   commit_changes -> done
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if len(res.Diagnostics) != 0 {
 		t.Fatalf("unexpected diagnostics: %+v", res.Diagnostics)
 	}
@@ -48,7 +48,7 @@ workflow w:
 	}
 
 	// Reparse: the quad must come back identical.
-	res2 := parser.Parse("test.iter", out)
+	res2 := parser.Parse("test.bot", out)
 	if len(res2.Diagnostics) != 0 {
 		t.Fatalf("reparse diagnostics: %+v\nsource:\n%s", res2.Diagnostics, out)
 	}

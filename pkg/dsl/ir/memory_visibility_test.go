@@ -24,7 +24,7 @@ workflow w:
   entry: x
   x -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parse: %+v", pr.Diagnostics)
 	}
@@ -64,7 +64,7 @@ workflow w:
   entry: x
   x -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parse: %+v", pr.Diagnostics)
 	}

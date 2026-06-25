@@ -51,13 +51,13 @@ describe("IterionInvocationError", () => {
     const err = new IterionInvocationError(
       "boom",
       "iterion",
-      ["run", "x.iter"],
+      ["run", "x.bot"],
       2,
       "out",
       "err",
     );
     expect(err.cmd).toBe("iterion");
-    expect(err.args).toEqual(["run", "x.iter"]);
+    expect(err.args).toEqual(["run", "x.bot"]);
     expect(err.exitCode).toBe(2);
     expect(err.stdout).toBe("out");
     expect(err.stderr).toBe("err");

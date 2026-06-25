@@ -1,7 +1,7 @@
 {
   "name": "iterion-dsl",
   "version": "0.1.0",
-  "description": "Write correct .iter workflow files for the Iterion orchestration engine",
+  "description": "Write correct .bot workflow files for the Iterion orchestration engine",
   "author": "SocialGouv",
   "license": "MIT",
   "repository": "https://github.com/SocialGouv/iterion",
@@ -9,7 +9,7 @@
     {
       "name": "iterion-dsl",
       "path": ".",
-      "description": "DSL reference for writing .iter multi-agent workflow files"
+      "description": "DSL reference for writing .bot multi-agent workflow files"
     }
   ],
   "compatibility": [

@@ -13,13 +13,11 @@ import (
 // FuzzParse — detect panics in the parser on malformed inputs
 // ---------------------------------------------------------------------------
 
-// loadFixtureSeeds adds all workflow fixtures (.iter / .bot) from examples/ as seed corpus entries.
+// loadFixtureSeeds adds all workflow fixtures (.bot) from examples/ as seed corpus entries.
 func loadFixtureSeeds(f *testing.F) {
 	f.Helper()
 	for _, glob := range []string{
-		"../../../examples/*.iter",
 		"../../../examples/*.bot",
-		"../../../examples/skill/*.iter",
 		"../../../examples/skill/*.bot",
 	} {
 		paths, err := filepath.Glob(glob)
@@ -46,7 +44,7 @@ func FuzzParse(f *testing.F) {
 	f.Add("schema s:\n  field: string\n  field: int\n")
 
 	f.Fuzz(func(t *testing.T, src string) {
-		res := parser.Parse("fuzz.iter", src)
+		res := parser.Parse("fuzz.bot", src)
 		if res == nil {
 			t.Fatal("Parse returned nil")
 		}
@@ -65,7 +63,7 @@ func FuzzLexer(f *testing.F) {
 	f.Add("\"unterminated string\n")
 
 	f.Fuzz(func(t *testing.T, src string) {
-		lex := parser.NewLexer("fuzz.iter", src)
+		lex := parser.NewLexer("fuzz.bot", src)
 		for {
 			tok := lex.Next()
 			if tok.Type == parser.TokenEOF || tok.Type == parser.TokenError {

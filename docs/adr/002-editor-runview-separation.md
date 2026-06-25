@@ -3,7 +3,7 @@
 ## Context
 
 The Iterion editor is a React/Vite SPA embedded in the Go binary
-(`pkg/server/`). It originally hosted a single concern: authoring `.iter`
+(`pkg/server/`). It originally hosted a single concern: authoring `.bot`
 workflows visually — drag-and-drop on a ReactFlow canvas, inspector
 panels for declarations, validation against the IR compiler, save/load
 through a REST file API.
@@ -183,7 +183,7 @@ and focused.
 
 ### 1. No live-edit during a run
 
-A user cannot tweak a `.iter` file while observing a running execution
+A user cannot tweak a `.bot` file while observing a running execution
 of it. **This is intentional**: the run is pinned to a specific
 workflow hash via the store, and editing the source mid-run has no
 clear semantics (does the change apply? to future iterations only? to

@@ -30,7 +30,7 @@ func TestMigrateRunPaths_RewritesMovedBots(t *testing.T) {
   "note": "keep /examples/whats-next inside a non-path field untouched"
 }`)
 	stayed := writeRunJSON(t, storeDir, "run-demo",
-		`{"run_id":"run-demo","file_path":"/home/u/proj/examples/cursors/sample.iter"}`)
+		`{"run_id":"run-demo","file_path":"/home/u/proj/examples/cursors/sample.bot"}`)
 
 	res, err := MigrateRunPaths(MigrateRunPathsOptions{StoreDir: storeDir})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestMigrateRunPaths_RewritesMovedBots(t *testing.T) {
 		t.Errorf("unrelated field lost:\n%s", gs)
 	}
 	// Demo bot that stayed under examples/ is untouched.
-	if gd := readFile(t, stayed); !strings.Contains(gd, "examples/cursors/sample.iter") {
+	if gd := readFile(t, stayed); !strings.Contains(gd, "examples/cursors/sample.bot") {
 		t.Errorf("demo path should be untouched: %s", gd)
 	}
 }

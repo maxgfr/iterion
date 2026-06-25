@@ -30,7 +30,7 @@ func hasDiag(diags []Diagnostic, code DiagCode) bool {
 }
 
 func TestUltracodeAcceptedAsEffort(t *testing.T) {
-	pr := parser.Parse("t.iter", ultracodeWorkflow("anthropic/claude-opus-4-8"))
+	pr := parser.Parse("t.bot", ultracodeWorkflow("anthropic/claude-opus-4-8"))
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parser must accept reasoning_effort: ultracode, got %+v", pr.Diagnostics)
 	}
@@ -44,7 +44,7 @@ func TestUltracodeAcceptedAsEffort(t *testing.T) {
 }
 
 func TestUltracodeGateWarnsOffOpus48(t *testing.T) {
-	pr := parser.Parse("t.iter", ultracodeWorkflow("anthropic/claude-sonnet-4-6"))
+	pr := parser.Parse("t.bot", ultracodeWorkflow("anthropic/claude-sonnet-4-6"))
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parser diagnostics: %+v", pr.Diagnostics)
 	}
@@ -61,7 +61,7 @@ func TestUltracodeGateWarnsOffOpus48(t *testing.T) {
 func TestUltracodeNoWarnOnOpusAlias(t *testing.T) {
 	// The bare "opus" alias resolves to the newest Opus (4.8) in claw's
 	// registry, so it must not trip the gate.
-	pr := parser.Parse("t.iter", ultracodeWorkflow("opus"))
+	pr := parser.Parse("t.bot", ultracodeWorkflow("opus"))
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parser diagnostics: %+v", pr.Diagnostics)
 	}

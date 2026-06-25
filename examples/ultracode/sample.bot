@@ -1,5 +1,5 @@
 ## Minimal workflow demonstrating the `ultracode` mode.
-## Run with: iterion run examples/ultracode/sample.iter
+## Run with: iterion run examples/ultracode/sample.bot
 ##
 ## reasoning_effort: ultracode = xhigh reasoning + a standing prerogative to
 ## orchestrate multi-agent workflows (the `agent` subagent tool). It is a mode,

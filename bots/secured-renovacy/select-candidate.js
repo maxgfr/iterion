@@ -1,16 +1,16 @@
 // secured-renovacy `select_candidate` — deterministic survivor pick.
 //
 // This script is what `bots/secured-renovacy/main.bot`'s
-// `select_candidate` tool runs inside the sandbox. The .iter embeds
+// `select_candidate` tool runs inside the sandbox. The .bot embeds
 // it as a base64 string in the command body (recipe DSL doesn't
 // support multi-line strings or raw quotes, and escape-juggling
 // every `"` through nested DSL+shell+jq+printf layers is a recurring
 // source of fragility). The base64 wrapper sidesteps every escape
 // concern: the source file lives here for review/edit, and a tiny
 // `node scripts/encode-select-candidate.sh` (or equivalent one-liner)
-// re-encodes it into the .iter.
+// re-encodes it into the .bot.
 //
-// Inputs (env vars set by the .iter shell wrapper):
+// Inputs (env vars set by the .bot shell wrapper):
 //   PKGS_FILE  — path to JSON file with `packages` (object keyed by
 //                name OR array of {name, current, target, risk} OR
 //                a `{list|items|packages|data: [...]}` wrapper).

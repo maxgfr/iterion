@@ -68,7 +68,7 @@
 ## decides whether to fast-forward main themselves.
 ##
 ## Run example:
-##   devbox run -- iterion run examples/dogfood_editor_ui_loop.iter \
+##   devbox run -- iterion run examples/dogfood_editor_ui_loop.bot \
 ##     --var feature_prompt='Add a "Pause run" button under the run
 ##                            header that POSTs /api/runs/{id}/pause'
 ## ─────────────────────────────────────────────────────────────────

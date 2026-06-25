@@ -85,7 +85,7 @@ POST /api/runs
 Content-Type: application/json
 
 {
-  "file_path": "/path/to/workflow.iter",
+  "file_path": "/path/to/workflow.bot",
   "attachments": { "logo": "up_1717169012_aabbccdd" }
 }
 ```

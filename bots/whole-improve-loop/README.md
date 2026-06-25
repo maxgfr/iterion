@@ -245,4 +245,4 @@ For multi-day refinement sessions, keep here:
 - Adaptation guide when reusing the pattern for another project
 
 See [SKILL-run-and-refine.md](../../SKILL-run-and-refine.md) for the
-general run/refine practice on any `.iter`.
+general run/refine practice on any `.bot`.

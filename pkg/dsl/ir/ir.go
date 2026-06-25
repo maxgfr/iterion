@@ -50,7 +50,7 @@ type Workflow struct {
 	// node-watchers the engine spawns at run start (not graph nodes). See
 	// docs/supervisors.md.
 	Supervisors []*Supervisor
-	// MCPServers contains the explicit top-level declarations from the .iter file.
+	// MCPServers contains the explicit top-level declarations from the .bot file.
 	MCPServers map[string]*MCPServer
 	// ActiveMCPServers and ResolvedMCPServers are populated after project config
 	// resolution, not by the compiler itself.

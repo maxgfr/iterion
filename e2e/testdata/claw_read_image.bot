@@ -46,7 +46,7 @@ schema vision_output:
 
 agent visioner:
   ## Pure claw agent. tool.RegisterClawComputerUse exposes the
-  ## vision tools to the iterion registry; the .iter contract here
+  ## vision tools to the iterion registry; the .bot contract here
   ## just declares it as available.
   model: "anthropic/claude-haiku-4-5-20251001"
   input: vision_input

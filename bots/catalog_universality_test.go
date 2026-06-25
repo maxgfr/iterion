@@ -21,7 +21,7 @@ import (
 // should be language/layout-agnostic. It deliberately inspects ONLY
 // `name: type = "literal"` var defaults: comments may legitimately
 // mention `cmd/iterion` as an example, and runtime references
-// (mcp__iterion_board__*, `iterion report`, `.iter` DSL) are fine —
+// (mcp__iterion_board__*, `iterion report`, `.bot` DSL) are fine —
 // the bot is written FOR iterion, it must not be scoped TO iterion.
 
 // varDefaultRe matches a typed var default with a string literal:

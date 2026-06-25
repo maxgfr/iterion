@@ -67,7 +67,7 @@ type RunHeader struct {
 	// BundleName mirrors the .botz manifest's `name` field captured
 	// at launch (e.g. "feature-dev"). The studio RunHeader pairs it
 	// with WorkflowName so the operator can distinguish bundles whose
-	// internal workflow name was customised. Empty for plain .iter
+	// internal workflow name was customised. Empty for plain .bot
 	// runs.
 	BundleName string `json:"bundle_name,omitempty"`
 	// BundleDisplayName mirrors the manifest's `display_name` (e.g.

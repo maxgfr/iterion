@@ -25,8 +25,8 @@ import (
 // `iterion run` but framed as data so HTTP handlers (and any future
 // programmatic caller) construct it without going through cobra flags.
 type LaunchSpec struct {
-	FilePath string // absolute .iter path; sandbox check is the caller's job
-	// Source carries the .iter source verbatim. Used by cloud-mode
+	FilePath string // absolute .bot path; sandbox check is the caller's job
+	// Source carries the .bot source verbatim. Used by cloud-mode
 	// callers when the server pod has no local copy of the workflow
 	// (the studio SPA uploads the source inline). When non-empty it
 	// takes precedence over FilePath for parsing; FilePath is still
@@ -117,7 +117,7 @@ type LaunchSpec struct {
 	ProjectPath string
 	// BotID is the bot bundle name (e.g. "review-pr") this run launches.
 	// The cloud publisher uses it to resolve bot-secret bindings during
-	// credential sealing. Empty for plain .iter/.bot launches.
+	// credential sealing. Empty for plain .bot launches.
 	BotID string
 	// KeyOverrides pins a specific BYOK key per LLM provider for this run
 	// (provider name → api_key id), overriding the org/user default in
@@ -133,9 +133,9 @@ type LaunchSpec struct {
 // ResumeSpec describes a resume request.
 type ResumeSpec struct {
 	RunID    string
-	FilePath string // .iter file (loaded fresh; must match the run's WorkflowHash unless Force)
+	FilePath string // .bot file (loaded fresh; must match the run's WorkflowHash unless Force)
 	// Source mirrors LaunchSpec.Source: cloud-mode callers can supply
-	// the .iter contents inline so the server pod does not need to
+	// the .bot contents inline so the server pod does not need to
 	// resolve FilePath against a local filesystem.
 	Source  string
 	Answers map[string]interface{} // answers for human nodes; ignored for failed_resumable
@@ -155,7 +155,7 @@ type RunSummary struct {
 	// BundleName is the bot/bundle label (e.g. "docs-refresh"). Sourced
 	// from the persisted Run.BundleName; falls back server-side to
 	// basename(BundlePath) (stripped of `.botz`) for legacy runs.
-	// Empty for plain .iter/.bot runs with no bundle.
+	// Empty for plain .bot runs with no bundle.
 	BundleName string `json:"bundle_name,omitempty"`
 	// BundleDisplayName is the bot's persona label (e.g. "Nexie") from
 	// the bundle manifest. Empty for plain runs; the studio falls back
@@ -273,7 +273,7 @@ type Service struct {
 
 	// wireWFCache memoises WireWorkflow projections by (filePath, hash)
 	// so /api/runs/{id}/workflow doesn't re-parse + re-compile on every
-	// request. Invalidated implicitly when the .iter source changes
+	// request. Invalidated implicitly when the .bot source changes
 	// (hash mismatch). See workflow_export.go.
 	wireWFCache wireWorkflowCache
 

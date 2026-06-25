@@ -25,7 +25,7 @@ import (
 // `${localWorkspaceFolder}`, and `${localWorkspaceFolderBasename}` in
 // the input string. Same semantics as ExpandLocalVarsInFile but on a
 // raw string — used by the runtime to expand inline `sandbox:` blocks
-// in .iter files (Mounts, PostCreate, etc.) just like devcontainer.json.
+// in .bot files (Mounts, PostCreate, etc.) just like devcontainer.json.
 //
 // Container-side variables (`${containerEnv:...}`,
 // `${containerWorkspaceFolder*}`) are left untouched; they are

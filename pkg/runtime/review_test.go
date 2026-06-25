@@ -187,7 +187,7 @@ workflow wf:
   gate -> done when "decision == 'approved'"
   gate -> fail
 `
-	cr := ir.Compile(parser.Parse("t.iter", src).File)
+	cr := ir.Compile(parser.Parse("t.bot", src).File)
 	if cr.Workflow == nil {
 		t.Fatalf("compile failed: %+v", cr.Diagnostics)
 	}
@@ -266,7 +266,7 @@ workflow wf:
   gate -> impl when "decision == 'changes_requested'" as fix_loop(3)
   gate -> fail
 `
-	cr := ir.Compile(parser.Parse("t.iter", src).File)
+	cr := ir.Compile(parser.Parse("t.bot", src).File)
 	if cr.Workflow == nil {
 		t.Fatalf("compile failed: %+v", cr.Diagnostics)
 	}

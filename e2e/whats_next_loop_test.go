@@ -85,7 +85,7 @@ func newSmokeDispatcherFixture(t *testing.T, polling time.Duration) (
 
 	cfg := &dispatcher.Config{
 		Name:      "e2e-smoke-loop",
-		Workflow:  dir + "/dummy.iter",
+		Workflow:  dir + "/dummy.bot",
 		Tracker:   dispatcher.TrackerConfig{Kind: "native"},
 		Polling:   dispatcher.PollingConfig{IntervalMS: int(polling.Milliseconds())},
 		Agent:     dispatcher.AgentConfig{MaxConcurrent: 2, MaxRetryBackoffMS: 500},

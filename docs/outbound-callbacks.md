@@ -24,7 +24,7 @@ Supply three optional fields when launching a run via `POST /api/runs`
 
 ```jsonc
 {
-  "source": "<.iter/.bot source>",
+  "source": "<.bot source>",
   "vars": { "...": "..." },
   "callback_url": "https://my-service.example.com/iterion-callback",
   "callback_token": "<opaque correlation value>",

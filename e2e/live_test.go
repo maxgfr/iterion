@@ -265,7 +265,7 @@ func TestLive_Lite_DualModel_PlanImplementReview(t *testing.T) {
 	}
 
 	// Compile the fixture.
-	wf := compileFixture(t, "dual_model_plan_implement_review.iter")
+	wf := compileFixture(t, "dual_model_plan_implement_review.bot")
 
 	// Create a persistent workspace directory.
 	workspaceDir, err := os.MkdirTemp("", "iterion-plan-impl-review-*")
@@ -620,7 +620,7 @@ func TestLive_Lite_SessionContinuity_ReviewFix(t *testing.T) {
 		t.Setenv("CLAUDE_MODEL", "openai/gpt-5.5")
 	}
 
-	wf := compileFixture(t, "session_review_fix.iter")
+	wf := compileFixture(t, "session_review_fix.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-session-review-fix-*")
 	if err != nil {
@@ -893,7 +893,7 @@ func TestLive_Full_ExhaustiveDSLCoverage(t *testing.T) {
 		t.Setenv("CLAUDE_MODEL", "openai/gpt-5.5")
 	}
 
-	wf := compileFixture(t, "exhaustive_dsl_coverage.iter")
+	wf := compileFixture(t, "exhaustive_dsl_coverage.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-exhaustive-*")
 	if err != nil {
@@ -1229,7 +1229,7 @@ func TestLive_Lite_SessionInheritValidation(t *testing.T) {
 		t.Setenv("CLAUDE_MODEL", "openai/gpt-5.5")
 	}
 
-	wf := compileFixture(t, "session_inherit_validation.iter")
+	wf := compileFixture(t, "session_inherit_validation.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-session-inherit-*")
 	if err != nil {
@@ -1402,7 +1402,7 @@ func TestLive_Lite_ClawComprehensive(t *testing.T) {
 	requireOpenAI(t)
 	requireEnv(t, "ANTHROPIC_API_KEY")
 
-	wf := compileFixture(t, "claw_comprehensive_coverage.iter")
+	wf := compileFixture(t, "claw_comprehensive_coverage.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-claw-comprehensive-*")
 	if err != nil {
@@ -1714,7 +1714,7 @@ func TestLive_Lite_ClawBuiltinTools(t *testing.T) {
 	requireEnv(t, "ANTHROPIC_API_KEY")
 	requireBinaryInPath(t, "go")
 
-	wf := compileFixture(t, "claw_builtin_tools.iter")
+	wf := compileFixture(t, "claw_builtin_tools.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-claw-builtin-tools-*")
 	if err != nil {
@@ -1877,7 +1877,7 @@ func TestLive_Lite_ClawReadImage(t *testing.T) {
 	loadDotEnv(t)
 	requireEnv(t, "ANTHROPIC_API_KEY")
 
-	wf := compileFixture(t, "claw_read_image.iter")
+	wf := compileFixture(t, "claw_read_image.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-claw-read-image-*")
 	if err != nil {
@@ -2030,7 +2030,7 @@ func TestLive_Lite_ClawReadImage(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestLive_Lite_ClawReasoningEffort verifies that a node's reasoning_effort
-// field propagates from the .iter declaration to the request body sent to
+// field propagates from the .bot declaration to the request body sent to
 // the provider, by inspecting the EventLLMRequest entry in the store.
 //
 // Asserts that the EventLLMRequest event for the `thinker` node contains
@@ -2051,7 +2051,7 @@ func TestLive_Lite_ClawReasoningEffort(t *testing.T) {
 	loadDotEnv(t)
 	requireOpenAI(t)
 
-	wf := compileFixture(t, "claw_reasoning_effort.iter")
+	wf := compileFixture(t, "claw_reasoning_effort.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-claw-reasoning-*")
 	if err != nil {
@@ -2150,7 +2150,7 @@ func TestLive_Lite_ClawMCP(t *testing.T) {
 	}
 	t.Setenv("ITERION_MCP_TEST_BINARY", binPath)
 
-	wf := compileFixture(t, "claw_mcp.iter")
+	wf := compileFixture(t, "claw_mcp.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-claw-mcp-*")
 	if err != nil {
@@ -2303,7 +2303,7 @@ func TestLive_Lite_ClawLongContext(t *testing.T) {
 	loadDotEnv(t)
 	requireEnv(t, "ANTHROPIC_API_KEY")
 
-	wf := compileFixture(t, "claw_long_context.iter")
+	wf := compileFixture(t, "claw_long_context.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-claw-long-*")
 	if err != nil {
@@ -2450,7 +2450,7 @@ func TestLive_Lite_ClawSubagents(t *testing.T) {
 	loadDotEnv(t)
 	requireEnv(t, "ANTHROPIC_API_KEY")
 
-	wf := compileFixture(t, "claw_subagents.iter")
+	wf := compileFixture(t, "claw_subagents.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-claw-subagents-*")
 	if err != nil {

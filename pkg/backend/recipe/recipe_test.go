@@ -63,7 +63,7 @@ func writeJSON(t *testing.T, dir, name string, v interface{}) string {
 func TestLoadValidRecipe(t *testing.T) {
 	spec := &RecipeSpec{
 		Name:        "fast_review",
-		WorkflowRef: WorkflowRef{Name: "pr_refine", Path: "examples/pr_refine.iter"},
+		WorkflowRef: WorkflowRef{Name: "pr_refine", Path: "examples/pr_refine.bot"},
 		PresetVars: PresetVars{
 			"model_name": "gpt-4o",
 		},

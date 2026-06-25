@@ -83,8 +83,8 @@ type Run struct {
 	ShardCount   int    `json:"shard_count,omitempty" bson:"shard_count,omitempty"`
 	ShardLabel   string `json:"shard_label,omitempty" bson:"shard_label,omitempty"`
 	WorkflowName string `json:"workflow_name" bson:"workflow_name"`
-	WorkflowHash string `json:"workflow_hash,omitempty" bson:"workflow_hash,omitempty"` // SHA-256 of the .iter source at run start
-	FilePath     string `json:"file_path,omitempty" bson:"file_path,omitempty"`         // absolute .iter source path captured at launch (resume without re-supplying file)
+	WorkflowHash string `json:"workflow_hash,omitempty" bson:"workflow_hash,omitempty"` // SHA-256 of the .bot source at run start
+	FilePath     string `json:"file_path,omitempty" bson:"file_path,omitempty"`         // absolute .bot source path captured at launch (resume without re-supplying file)
 	// Preset is the in-source preset name selected at launch via
 	// `--preset <name>` (or the studio Launch modal). Persisted so
 	// `iterion resume` re-applies the same parameter set without the
@@ -100,17 +100,17 @@ type Run struct {
 	// `.botz` archive backing this run. Used by resume to re-locate
 	// the same cache slot (and detect when the archive has changed
 	// out from under the run). Empty when the run was launched from a
-	// plain .iter/.bot file or a directory bundle (no archive).
+	// plain .bot file or a directory bundle (no archive).
 	BundleHash string `json:"bundle_hash,omitempty" bson:"bundle_hash,omitempty"`
 	// BundlePath is the absolute path of the source `.botz` archive
 	// or directory bundle captured at launch. Used by resume to
 	// re-extract the archive when the cache has been GC'd between
-	// runs. Empty for plain .iter/.bot runs.
+	// runs. Empty for plain .bot runs.
 	BundlePath string `json:"bundle_path,omitempty" bson:"bundle_path,omitempty"`
 	// BundleName is the bundle's `manifest.yaml` `name` field captured at
 	// launch (e.g. "docs-refresh"). Display-only — surfaces it in run lists
 	// so dispatcher-spawned bot runs are visually grouped. Empty for
-	// plain .iter/.bot runs and for bundles whose manifest had no name;
+	// plain .bot runs and for bundles whose manifest had no name;
 	// consumers fall back to basename(BundlePath) stripped of `.botz`.
 	BundleName string `json:"bundle_name,omitempty" bson:"bundle_name,omitempty"`
 	// BundleDisplayName is the bundle's friendly persona name (e.g.
@@ -235,7 +235,7 @@ type Run struct {
 	// launched this run. It is persisted so cloud resume/retry can
 	// re-resolve bot-secret bindings after the initial queue message
 	// has been consumed or its sealed secrets bundle has expired. Empty
-	// for plain .iter/.bot launches and legacy runs.
+	// for plain .bot launches and legacy runs.
 	BotID string `json:"bot_id,omitempty" bson:"bot_id,omitempty"`
 	// KeyOverrides pins a BYOK key per LLM provider (provider → api_key id)
 	// for this run, persisted so cloud resume re-resolves with the same
@@ -298,7 +298,7 @@ type Run struct {
 	// the (node_id, turn_index) snapshot the fork was anchored at.
 	// SourceHash is the parent's workflow hash at fork time; the
 	// current Run.WorkflowHash captures the *child's* workflow at
-	// fork, which may differ when the source .iter has changed (fork
+	// fork, which may differ when the source .bot has changed (fork
 	// bypasses the strict-hash check by default — see plan Phase 3).
 	ForkedFrom string      `json:"forked_from,omitempty" bson:"forked_from,omitempty"`
 	ForkAnchor *ForkAnchor `json:"fork_anchor,omitempty" bson:"fork_anchor,omitempty"`
@@ -541,7 +541,7 @@ type Artifact struct {
 // attached to Run.Attachments so run.json / Mongo documents stay
 // compact and replayable.
 type AttachmentRecord struct {
-	// Name is the declared attachment name from the .iter
+	// Name is the declared attachment name from the .bot
 	// `attachments:` block (e.g. "logo", "spec").
 	Name string `json:"name" bson:"name"`
 	// OriginalFilename is the filename provided by the uploader

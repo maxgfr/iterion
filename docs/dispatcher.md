@@ -75,7 +75,7 @@ iterion issue create --title "Investigate flaky test" --state ready --priority 5
 # 2. Write an `iterion.dispatcher.yaml` next to your workflow.
 cat > iterion.dispatcher.yaml <<'EOF'
 name: dev-loop
-workflow: ./workflow.iter
+workflow: ./workflow.bot
 tracker:
   kind: native
 dispatch:
@@ -278,7 +278,7 @@ WARN.
 ## Dispatch templates
 
 The `dispatch.vars` block maps workflow input **vars** to per-issue
-values using the same `{{namespace.path}}` syntax the `.iter` DSL
+values using the same `{{namespace.path}}` syntax the `.bot` DSL
 exposes — but with a narrower set of namespaces.
 
 > **Attachments are not dispatchable.** There is no `dispatch.attachments`

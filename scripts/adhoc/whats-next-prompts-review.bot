@@ -15,7 +15,7 @@
 ##   - be honest about prompts that are fine
 ##
 ## Run:
-##   devbox run -- iterion run scripts/adhoc/whats-next-prompts-review.iter
+##   devbox run -- iterion run scripts/adhoc/whats-next-prompts-review.bot
 ##
 ## After a green run, read the structured output and apply targeted
 ## fixes by hand. Don't auto-rewrite — prompt diffs deserve human

@@ -446,7 +446,7 @@ type parser struct {
 }
 
 // maxExprDepth caps recursive descent depth so a pathologically nested
-// expression (e.g. `(((...)))` from an untrusted .iter under multitenant
+// expression (e.g. `(((...)))` from an untrusted .bot under multitenant
 // cloud) can't blow the goroutine stack. Generous enough that any
 // hand-written expression fits, tight enough that malicious input is
 // rejected before it can exhaust the stack.
@@ -1172,7 +1172,7 @@ func builtinLength(args []interface{}) (interface{}, error) {
 	// generic []interface{}) still measure correctly. Without this,
 	// the legacy type-switch errored on every concrete-typed slice
 	// and the failing `length()` silently disabled the enclosing
-	// `when` edge condition — surfaced by an `.iter` workflow whose
+	// `when` edge condition — surfaced by an `.bot` workflow whose
 	// streak_check edge guarded fix routing on length(blockers) > 0.
 	if rv := reflect.ValueOf(args[0]); rv.IsValid() {
 		switch rv.Kind() {

@@ -24,7 +24,7 @@ See [cli-reference.md `#iterion-studio`](cli-reference.md#iterion-studio) for th
 - **Canvas** — Drag-and-drop node graph with auto-layout, zoom, search, and keyboard shortcuts
 - **Node library** — Drag pre-built node types (agent, judge, router, human, tool, compute) onto the canvas
 - **Property editor** — Edit node properties, schemas, prompts, and edge conditions in a side panel
-- **Source view** — Split-pane view showing the raw workflow source (`.iter` / `.bot`) alongside the visual graph
+- **Source view** — Split-pane view showing the raw workflow source (`.bot` / `.bot`) alongside the visual graph
 - **Live diagnostics** — Real-time validation errors and warnings as you edit (codes C001–C086, sparse)
 - **File watching** — Detects external file changes via WebSocket and syncs automatically
 - **Undo/redo** — Full edit history

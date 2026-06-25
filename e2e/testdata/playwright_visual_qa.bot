@@ -38,7 +38,7 @@
 ##
 ## Run example:
 ##   set -a; source .env; set +a
-##   ./iterion run examples/playwright_visual_qa.iter \
+##   ./iterion run examples/playwright_visual_qa.bot \
 ##     --var target_url=https://playwright.dev \
 ##     --var objective='Verify the homepage loads, the docs link in the navbar opens the docs, and the search box is reachable from the homepage'
 ## ─────────────────────────────────────────────────────────────────

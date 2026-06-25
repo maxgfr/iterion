@@ -50,7 +50,7 @@ describe("execIterion", () => {
 
   it("records the argv passed to the binary", async () => {
     const recordPath = join(tmp, "calls.jsonl");
-    await execIterion("node", [FAKE, "--json", "validate", "x.iter"], {
+    await execIterion("node", [FAKE, "--json", "validate", "x.bot"], {
       env: {
         ...process.env,
         FAKE_ITERION_RECORD: recordPath,
@@ -60,7 +60,7 @@ describe("execIterion", () => {
     const lines = (await readFile(recordPath, "utf8")).trim().split("\n");
     expect(lines).toHaveLength(1);
     const parsed = JSON.parse(lines[0]!);
-    expect(parsed.argv).toEqual(["--json", "validate", "x.iter"]);
+    expect(parsed.argv).toEqual(["--json", "validate", "x.bot"]);
   });
 
   it("times out long-running invocations", async () => {
@@ -111,7 +111,7 @@ describe("parseFirstJSON", () => {
   it("returns the FIRST object when stdout has two concatenated envelopes", () => {
     // Mirrors the real iterion `--json validate <bad>` case.
     const stdout =
-      JSON.stringify({ file: "bad.iter", valid: false, parse_diagnostics: ["x"] }) +
+      JSON.stringify({ file: "bad.bot", valid: false, parse_diagnostics: ["x"] }) +
       "\n" +
       JSON.stringify({ error: "validation failed" }) +
       "\n";

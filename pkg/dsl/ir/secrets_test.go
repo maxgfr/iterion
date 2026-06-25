@@ -25,7 +25,7 @@ workflow w:
   entry: x
   x -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parser diagnostics: %+v", pr.Diagnostics)
 	}
@@ -70,7 +70,7 @@ workflow w:
   entry: x
   x -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parser diagnostics: %+v", pr.Diagnostics)
 	}
@@ -149,7 +149,7 @@ workflow w:
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			pr := parser.Parse("t.iter", tc.src)
+			pr := parser.Parse("t.bot", tc.src)
 			if len(pr.Diagnostics) > 0 {
 				t.Fatalf("parser diagnostics: %+v", pr.Diagnostics)
 			}
@@ -206,7 +206,7 @@ workflow w:
   entry: a
   a -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parser diagnostics: %+v", pr.Diagnostics)
 	}
@@ -239,7 +239,7 @@ workflow w:
   entry: a
   a -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	cr := Compile(pr.File)
 	found := false
 	for _, d := range cr.Diagnostics {

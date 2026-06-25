@@ -1574,7 +1574,7 @@ except ValueError:
 ## file_ref: paths like pkg/foo/bar.go, docs/dsl.md, with optional :NN line.
 ## We restrict to known code/doc roots to avoid false hits on prose.
 ## (?<![./\w-]) instead of \b: \b matched the /→letter boundary INSIDE a
-## longer path (e.g. '.archive/examples/foo.iter' captured 'examples/foo.iter',
+## longer path (e.g. '.archive/examples/foo.bot' captured 'examples/foo.bot',
 ## silently dropping the '.archive/' prefix → phantom file-not-found drift).
 ## The lookbehind refuses to start a match mid-path, so a known-root token is
 ## only captured when it's the true start of the reference.

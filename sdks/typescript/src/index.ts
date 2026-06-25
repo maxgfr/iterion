@@ -6,13 +6,13 @@
  * import { IterionClient } from "@iterion/sdk";
  *
  * const iterion = new IterionClient({ storeDir: ".iterion" });
- * const result = await iterion.run("examples/my_workflow.iter", {
+ * const result = await iterion.run("examples/my_workflow.bot", {
  *   vars: { repo: "my-repo" },
  * });
  * if (result.status === "paused_waiting_human") {
  *   const resumed = await iterion.resume({
  *     runId: result.run_id,
- *     file: "examples/my_workflow.iter",
+ *     file: "examples/my_workflow.bot",
  *     answers: { approve: true },
  *   });
  * }

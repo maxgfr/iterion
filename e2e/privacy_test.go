@@ -28,7 +28,7 @@ import (
 // privacy tools are pure Go and require neither API keys nor
 // external processes.
 func TestE2E_PrivacyPipeline(t *testing.T) {
-	wf := compileFixture(t, "privacy_pipeline.iter")
+	wf := compileFixture(t, "privacy_pipeline.bot")
 
 	storeDir := t.TempDir()
 	s, err := store.New(storeDir)

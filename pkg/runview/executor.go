@@ -53,7 +53,7 @@ type ExecutorSpec struct {
 	// `default_backend:` for this run only. Node-level explicit
 	// `backend:` still wins (it's the most specific level in the
 	// resolution chain). Used by the studio launch UI to A/B a
-	// workflow against different backends without editing the .iter.
+	// workflow against different backends without editing the .bot.
 	Backend string
 	// BotID is the stable bundle/bot identifier used to qualify
 	// structured visibility=bot memory. Empty falls back to Workflow.Name.

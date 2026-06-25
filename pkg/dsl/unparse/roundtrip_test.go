@@ -12,18 +12,13 @@ import (
 )
 
 // TestRoundtripExamples verifies that for every example workflow file
-// (.iter / .bot): parse → unparse → re-parse → re-compile produces a
+// (.bot): parse → unparse → re-parse → re-compile produces a
 // valid workflow with the same number of nodes and edges.
 func TestRoundtripExamples(t *testing.T) {
-	iterEx, err := filepath.Glob(filepath.Join("..", "..", "..", "examples", "*.iter"))
+	examples, err := filepath.Glob(filepath.Join("..", "..", "..", "examples", "*.bot"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	botEx, err := filepath.Glob(filepath.Join("..", "..", "..", "examples", "*.bot"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	examples := append(iterEx, botEx...)
 	if len(examples) == 0 {
 		t.Skip("no example files found")
 	}
@@ -126,7 +121,7 @@ workflow main:
   run_tests -> done
 `
 
-	pr1 := parser.Parse("tool_input.iter", src)
+	pr1 := parser.Parse("tool_input.bot", src)
 	if pr1.File == nil {
 		t.Fatal("parse returned nil File")
 	}
@@ -152,7 +147,7 @@ workflow main:
 	}
 
 	unparsed := unparse.Unparse(restored)
-	pr2 := parser.Parse("tool_input.roundtrip.iter", unparsed)
+	pr2 := parser.Parse("tool_input.roundtrip.bot", unparsed)
 	if pr2.File == nil {
 		t.Fatalf("re-parse returned nil File\nUnparsed:\n%s", unparsed)
 	}

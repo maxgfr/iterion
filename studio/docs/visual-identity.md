@@ -9,7 +9,7 @@ intent behind the token palette so future contributors can answer
 Iterion is a workflow orchestration engine for developers. Operators
 sit in front of the studio to:
 
-- Edit `.iter` workflows in a dense node-graph canvas.
+- Edit `.bot` workflows in a dense node-graph canvas.
 - Launch runs and watch them stream through an event log + IR
   visualisation.
 - Triage failures, resume from checkpoints, judge cost vs progress.

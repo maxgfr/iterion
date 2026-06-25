@@ -535,7 +535,7 @@ func (e *ClawExecutor) Compact(ctx context.Context, nodeID string) error {
 
 // NewClawExecutor creates a ClawExecutor for a given workflow.
 func NewClawExecutor(registry *Registry, wf *ir.Workflow, opts ...ClawExecutorOption) *ClawExecutor {
-	// Seed vars with workflow-declared defaults from the .iter `vars:`
+	// Seed vars with workflow-declared defaults from the .bot `vars:`
 	// block so prompt templates referencing {{vars.X}} resolve even
 	// when the var is not overridden via CLI --var or resume inputs.
 	// Without this, an unoverridden var with a default rendered as the

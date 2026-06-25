@@ -132,7 +132,7 @@ export default function LaunchView() {
   // Prefer the bot schema's presets (the union of in-source `presets:` and
   // file-based presets/<name>.md, carrying display_name / description / prompt
   // / skills) when the open file is a bundle's main.bot; fall back to the
-  // workflow doc's in-source presets for a loose .iter file.
+  // workflow doc's in-source presets for a loose .bot file.
   const allBots = useBotsStore((s) => s.bots);
   const fetchBots = useBotsStore((s) => s.fetch);
   useEffect(() => {

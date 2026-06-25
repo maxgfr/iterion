@@ -224,4 +224,4 @@ ever landing on disk; the audit-bundle catches what slipped through
   where findings land
 - [`docs/workflow_authoring_pitfalls.md`](workflow_authoring_pitfalls.md) —
   Goodhart's law in workflow design (façade resistance), required
-  reading if you author `.iter` files
+  reading if you author `.bot` files

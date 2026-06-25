@@ -17,8 +17,8 @@ func TestGenerateRunName_Deterministic(t *testing.T) {
 	seeds := []string{
 		"",
 		"foo",
-		"examples/hello.iter:run_1777532137550",
-		"workflows/review.iter:custom_id",
+		"examples/hello.bot:run_1777532137550",
+		"workflows/review.bot:custom_id",
 		"a very long seed string that is unusual",
 	}
 	for _, s := range seeds {
@@ -124,7 +124,7 @@ func TestGenerateRunName_Golden(t *testing.T) {
 	}{
 		{"", "obsidian-ripple-pizzazap-1c14"},
 		{"hello", "retro-hunt-riotchord-a30e"},
-		{"examples/x.iter:1", "meteor-vroom-arctickazoo-03cc"},
+		{"examples/x.bot:1", "orbital-yeet-voltageclash-7e84"},
 	}
 	for _, c := range cases {
 		got := GenerateRunName(c.seed)

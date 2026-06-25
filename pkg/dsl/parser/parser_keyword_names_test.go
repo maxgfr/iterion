@@ -34,7 +34,7 @@ func TestNodeNamedWithKeywordToken(t *testing.T) {
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			src := "agent " + name + ":\n  model: \"gpt-4\"\n"
-			res := parser.Parse("kw.iter", src)
+			res := parser.Parse("kw.bot", src)
 			for _, d := range res.Diagnostics {
 				t.Errorf("unexpected diagnostic on `agent %s:` -> %v", name, d)
 			}
@@ -64,7 +64,7 @@ presets:
 workflow trivial:
   entry: done
 `
-	res := parser.Parse("skip.iter", src)
+	res := parser.Parse("skip.bot", src)
 	if res.File.Presets == nil {
 		t.Fatalf("presets block lost after vars error; expected at least one preset to survive")
 	}
@@ -80,7 +80,7 @@ func TestPromptNamedWithKeywordToken(t *testing.T) {
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			src := "prompt " + name + ":\n  Hello from the body.\n"
-			res := parser.Parse("kwprompt.iter", src)
+			res := parser.Parse("kwprompt.bot", src)
 			for _, d := range res.Diagnostics {
 				t.Errorf("unexpected diagnostic on `prompt %s:` -> %v", name, d)
 			}

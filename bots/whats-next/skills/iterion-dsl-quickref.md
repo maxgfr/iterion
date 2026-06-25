@@ -1,13 +1,13 @@
 ---
 name: iterion-dsl-quickref
-description: Iterion DSL cheatsheet — load this only when whats-next.bot's next_action recommends writing or modifying a .iter / .bot / .botz workflow.
+description: Iterion DSL cheatsheet — load this only when whats-next.bot's next_action recommends writing or modifying a .bot / .botz workflow.
 ---
 
 # Iterion DSL Quickref — for whats-next.bot's `emit_action` and the rare DSL-writing recommendation
 
 Load this skill only in these two situations:
 
-1. **`emit_action` is about to recommend authoring a new `.iter` /
+1. **`emit_action` is about to recommend authoring a new `.bot` /
    `.bot`** (rare — most next_actions invoke an existing bot,
    not author a new one).
 2. **`propose_roadmap` / `revise_roadmap` is considering a

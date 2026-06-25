@@ -1,16 +1,16 @@
 ---
 name: iterion-dsl
 description: >
-  Use when asked to write .iter workflow files, create Iterion DSL workflows,
-  define multi-agent orchestration pipelines, or debug .iter syntax errors.
-  Triggers on: "write an .iter file", "iterion workflow", "iter DSL",
+  Use when asked to write .bot workflow files, create Iterion DSL workflows,
+  define multi-agent orchestration pipelines, or debug .bot syntax errors.
+  Triggers on: "write a .bot file", "iterion workflow", "iter DSL",
   "multi-agent pipeline", "workflow orchestration", "agent judge router".
 version: 0.1.0
 ---
 
 # Iterion DSL Reference
 
-Iterion is a workflow orchestration engine for multi-agent AI pipelines. Workflows are defined in `.iter` files using an **indentation-sensitive DSL** (2 spaces per level). One workflow per file.
+Iterion is a workflow orchestration engine for multi-agent AI pipelines. Workflows are defined in `.bot` files using an **indentation-sensitive DSL** (2 spaces per level). One workflow per file.
 
 ## File Structure
 
@@ -165,8 +165,8 @@ compute streak:
   input: streak_input               ## optional input schema
   output: streak_state              ## required output schema
   expr:
-    consecutive_passes: "loop.refine.iter"
-    ready: "outputs.review.passed && loop.refine.iter >= 2"
+    consecutive_passes: "loop.refine.bot"
+    ready: "outputs.review.passed && loop.refine.bot >= 2"
   await: wait_all
 ```
 
@@ -213,7 +213,7 @@ prompt review_user:
 - `{{outputs.node_id.field}}` — specific field from a node's output
 - `{{outputs.node_id.history}}` — array of all outputs across loop iterations (only valid for nodes in a loop)
 - `{{artifacts.X}}` — persistent artifact by name
-- `{{loop.<name>.iter}}` — current 0-based iteration of a declared loop
+- `{{loop.<name>.bot}}` — current 0-based iteration of a declared loop
 - `{{loop.<name>.previous.<field>}}` — previous iteration's field value on the loop's controlling node
 - `{{run.id}}`, `{{run.store_dir}}` — run-scoped metadata
 - `${ENV_VAR}` — environment variable (resolved at compile time)
@@ -359,7 +359,7 @@ vars:
   verbose: bool = false
 ```
 
-Workflow-level vars override top-level vars with the same name. Pass values at runtime: `iterion run file.iter --var key=value`.
+Workflow-level vars override top-level vars with the same name. Pass values at runtime: `iterion run file.bot --var key=value`.
 
 ## Common Mistakes
 
@@ -412,9 +412,9 @@ workflow review_pr:
 ## CLI Quick Reference
 
 ```bash
-iterion validate file.iter              # parse + compile + validate
-iterion run file.iter --var key=value   # execute workflow
-iterion diagram file.iter --view full   # generate Mermaid diagram
+iterion validate file.bot              # parse + compile + validate
+iterion run file.bot --var key=value   # execute workflow
+iterion diagram file.bot --view full   # generate Mermaid diagram
 iterion inspect --run-id <id>           # view run state
 iterion resume --run-id <id> --file f --answers-file a.json  # resume paused run
 ```
@@ -425,4 +425,3 @@ iterion resume --run-id <id> --file f --answers-file a.json  # resume paused run
 - [references/patterns.md](references/patterns.md) — common workflow patterns with examples
 - [references/diagnostics.md](references/diagnostics.md) — all validation diagnostic codes
 - [bots/feature-dev/](bots/feature-dev/), [bots/whole-improve-loop/](bots/whole-improve-loop/), [bots/branch-improve-loop/](bots/branch-improve-loop/) — productized `.bot` bots (proven, runnable)
-- [.archive/examples/skill/](.archive/examples/skill/) — archived minimal self-contained `.iter` didactic primitives

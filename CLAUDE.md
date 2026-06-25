@@ -1,6 +1,6 @@
 # Iterion
 
-Workflow orchestration engine with a custom DSL. Runnable workflows are `.bot` files (`.botz` for packaged bundles); the former `.iter` extension is no longer accepted at the CLI/server/studio boundaries and survives only as the DSL's raw/testdata form ([`pkg/dsl/workflowfile`](pkg/dsl/workflowfile/workflowfile.go)).
+Workflow orchestration engine with a custom DSL. Runnable workflows are `.bot` files (`.botz` for packaged bundles); the single source of truth for the accepted workflow extension is [`pkg/dsl/workflowfile`](pkg/dsl/workflowfile/workflowfile.go).
 
 ## Project nature
 
@@ -31,7 +31,7 @@ this file uses below). All Go and node tooling come from `devbox.json`;
 A `.devcontainer/devcontainer.json` provides the same environment for VS
 Code / GitHub Codespaces.
 
-**Cross-shell note:** `.iter` tool nodes invoke commands via `sh -c`,
+**Cross-shell note:** `.bot` tool nodes invoke commands via `sh -c`,
 which on Linux Mint/Ubuntu hosts is **dash**, but inside devbox is
 **bash 5.x**. Author tool commands as POSIX-compatible (no brace
 expansion, no `[[ ]]`, no `<<<`). See
@@ -79,15 +79,15 @@ The Go code follows the standard `cmd/` + `pkg/` layout. Three top-level Go dire
 - `pkg/` — All library code, grouped by role (see breakdown below)
 - `e2e/` — End-to-end test suite (kept at root by Go convention)
 
-Other top-level directories: `studio/` (React/Vite frontend), `examples/` (.iter workflows), `docs/` (incl. `docs/grammar/` EBNF and `docs/references/` patterns/diagnostics), `scripts/`, `vendor/`.
+Other top-level directories: `studio/` (React/Vite frontend), `examples/` (.bot workflows), `docs/` (incl. `docs/grammar/` EBNF and `docs/references/` patterns/diagnostics), `scripts/`, `vendor/`.
 
 ### `pkg/` breakdown
 
 - `pkg/dsl/` — DSL pipeline (parser → AST → IR)
-  - `parser/` — Lexer, parser, tokens, diagnostics for the .iter DSL
+  - `parser/` — Lexer, parser, tokens, diagnostics for the .bot DSL
   - `ast/` — AST definitions and `MarshalFile`/`UnmarshalFile` (JSON encoder for AST)
   - `ir/` — Intermediate Representation compilation and validation
-  - `unparse/` — IR back to .iter serialization
+  - `unparse/` — IR back to .bot serialization
   - `types/` — Shared enums (transports, field types, session/router/await/interaction modes)
   - `expr/` — Expression evaluator for `compute` nodes and `when` conditions
   - `workflowfile/` — Workflow source-file loading + hash computation (used by `iterion resume` change detection)
@@ -138,12 +138,12 @@ Other top-level directories: `studio/` (React/Vite frontend), `examples/` (.iter
 
 ## Architecture
 
-`.iter` files are parsed into an **AST**, compiled into an **IR** (directed graph of nodes and edges), validated, then executed by the **runtime** engine. Nodes include Agent (LLM), Judge, Router, Human (pause/resume), Tool, Compute, and terminal nodes (Done/Fail). Parallel branches converge on downstream nodes via `await: wait_all` or `await: best_effort`; there is no top-level Join node. The runtime supports parallel branch scheduling, loop detection, budget enforcement, and resumable execution.
+`.bot` files are parsed into an **AST**, compiled into an **IR** (directed graph of nodes and edges), validated, then executed by the **runtime** engine. Nodes include Agent (LLM), Judge, Router, Human (pause/resume), Tool, Compute, and terminal nodes (Done/Fail). Parallel branches converge on downstream nodes via `await: wait_all` or `await: best_effort`; there is no top-level Join node. The runtime supports parallel branch scheduling, loop detection, budget enforcement, and resumable execution.
 
 ### Compilation Pipeline
 
 ```
-.iter source → Lexer (indent-sensitive tokens) → Parser (recursive-descent) → AST
+.bot source → Lexer (indent-sensitive tokens) → Parser (recursive-descent) → AST
   → ir.Compile() → IR Workflow (nodes + edges + schemas + prompts + budget)
   → Diagnostics from ir.Compile() / ir.Validate() (sparse codes C001–C086: compile errors, reachability, routing, cycles, attachments, presets, capability checks (C080–C082), cursor declarations (C083–C086), etc.)
   → runtime.Engine.Run() → execution with events, budget, and persistence
@@ -304,7 +304,7 @@ The engine saves a checkpoint after every successful node execution. When a run 
 
 Common resumable failures: transient LLM errors (rate limit, timeout), budget exceeded (increase budget + resume), schema validation errors (fix workflow + `--force`), context timeout/cancellation, fan-out branch failures, router failures.
 
-**`--force` flag**: allows resume even when the `.iter` source has changed (e.g., bug fix). Without `--force`, a hash mismatch produces an error.
+**`--force` flag**: allows resume even when the `.bot` source has changed (e.g., bug fix). Without `--force`, a hash mismatch produces an error.
 
 See `docs/resume.md` for the exhaustive failure matrix.
 
@@ -391,7 +391,7 @@ platform overview: [docs/baas-overview.md](docs/baas-overview.md).
 ### Bot board access (capabilities)
 
 Agent and judge nodes can write to the native board by declaring a
-`capabilities:` list in the `.iter` DSL (e.g.
+`capabilities:` list in the `.bot` DSL (e.g.
 `capabilities: [board.create, board.move, board.read]`). The runtime
 opens the matching tools transparently based on the backend:
 
@@ -443,7 +443,7 @@ Cursors are framing dials, **not gates**. See
 [docs/cursors.md](docs/cursors.md) for the full contract — Goodhart
 resistance still lives in judges, scanners, and deterministic
 coverage gates. Reference catalogue:
-[examples/cursors/cursors.iter](examples/cursors/cursors.iter)
+[examples/cursors/cursors.bot](examples/cursors/cursors.bot)
 ships `ambition` / `depth` / `rigor` / `autonomy`.
 
 ### Supervisors (`supervisor <name>:`)
@@ -544,7 +544,7 @@ Current bundles and their skills:
   `openai/gpt-5.5` against this repo; `iterion-board` was added by
   the board-capabilities work and `session-continuity` by the
   workspace-memory work — see
-  [scripts/adhoc/whats-next-skills-gen.iter](scripts/adhoc/whats-next-skills-gen.iter)
+  [scripts/adhoc/whats-next-skills-gen.bot](scripts/adhoc/whats-next-skills-gen.bot)
   for the generator (the seed for a future formalised
   `generate-skills.bot`).
 
@@ -574,9 +574,9 @@ If a skill ends up duplicated across multiple bundles, accept the
 duplication for now (iterion has no skill-sharing primitive yet)
 and add a TODO comment in each copy pointing to its peers.
 
-## Authoring `.iter` workflows that touch real code
+## Authoring `.bot` workflows that touch real code
 
-**Before writing or amending any `.iter` workflow that has the power to
+**Before writing or amending any `.bot` workflow that has the power to
 commit code, read [docs/workflow_authoring_pitfalls.md](docs/workflow_authoring_pitfalls.md).**
 It captures hard-won lessons about Goodhart's law in workflow design,
 the façade pattern that LLM agents reach for when goals are
@@ -671,7 +671,7 @@ the following are violations when they appear as **defaults**:
 **Not violations** (these are the *runtime*, not the target repo):
 references to iterion the engine running the bot — `mcp__iterion_board__*`
 capability tools, "iterion's expr / template substitution", `iterion
-report` for surfacing output, `.iter`/`.bot` DSL syntax. The bot is
+report` for surfacing output, `.bot`/`.bot` DSL syntax. The bot is
 *written for* iterion; it must not be *scoped to* iterion.
 
 **Enforcement:** `bots/catalog_universality_test.go` greps every
@@ -859,7 +859,7 @@ Global flags: `--json` (machine output), `--help`
 ## Testing Patterns
 
 - `tmpStore()` — creates temp directory-backed RunStore for test isolation
-- `compileFixture()` — loads and compiles .iter files from `examples/` directory
+- `compileFixture()` — loads and compiles .bot files from `examples/` directory
 - **Scenario executor** (`e2e/e2e_test.go`) — configurable stub with `.on(nodeID, handler)` for per-node behavior
 - Table-driven subtests with standard `testing` package
 - `task test:live` — runs E2E with real Claude/Codex CLIs (requires API keys)

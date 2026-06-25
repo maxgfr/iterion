@@ -20,7 +20,7 @@ blocker for this bot**. Either fit it into the taxonomy or drop it.
 | `dead_link` | A markdown link points to a path or anchor that no longer exists. Drift candidates with `kind: md_link` are deterministic detections of exactly this (target file missing, or a `.md` `#heading-anchor` absent under GitHub-slug matching) — confirm them as `dead_link` (`anchor_kind: external`) unless the link is plainly illustrative. | `[see resume docs](docs/resume.md)` but the file was renamed; or `[README](README.md#iter-vs-bot)` where README has no such heading. |
 | `removed_file_ref` | Docs reference a file or directory by path that no longer exists, outside markdown link syntax. | README mentions "see `cmd/legacy/main.go` for the old entrypoint" but `cmd/legacy/` was deleted. |
 | `stale_behavior_description` | Prose claim about behaviour does not match what the code actually does. | doc says "merges into HEAD by default", code now requires `--merge-into=current` and skips otherwise. |
-| `outdated_example` | A code block / example in docs fails to parse, compile, or correspond to the current API surface. | An `.iter` snippet in `docs/grammar/` uses a property that the parser no longer accepts. |
+| `outdated_example` | A code block / example in docs fails to parse, compile, or correspond to the current API surface. | An `.bot` snippet in `docs/grammar/` uses a property that the parser no longer accepts. |
 | `wrong_default_value` | Docs claim a default value different from the code's actual default. | docs say `timeout=30s default`, code default is `60s`. |
 | `obsolete_capability` | Docs list a feature or capability the code no longer supports (or has not yet shipped). | README lists `--web-ui` as a flag, the web UI was extracted to a separate binary. |
 | `wrong_directory_layout` | A directory / package tree shown in docs (e.g. ASCII tree, table of `pkg/` contents) is incomplete or misaligned with the filesystem. | CLAUDE.md's `pkg/` breakdown omits `pkg/dispatcher/native/` which exists on disk. |
@@ -64,7 +64,7 @@ mechanically auditable.
 | `symbol` | The mismatch is about a named function / type / const / var. The anchor identifies the symbol the reviewer can grep for. | `"pkg/foo/bar.go:Handler"` or `"pkg/foo/bar.go:func Handler"` |
 | `line_range` | The mismatch is about a block of code without a clean symbol name (e.g. a config snippet, an inline expression). | `"pkg/foo/bar.go:42-58"` |
 | `removed` | The doc claims something exists but it no longer does. The anchor names the former location. | `"pkg/legacy/old.go (removed in commit X)"` or `"<no longer exists>"` |
-| `external` | The mismatch is about a non-code claim — e.g. a dead link to a doc file, a stale upstream URL, a wrong directory layout. The anchor is the filesystem/external path the doc references. | `"docs/old-thing.md"` or `"examples/preview_url_demo.iter"` |
+| `external` | The mismatch is about a non-code claim — e.g. a dead link to a doc file, a stale upstream URL, a wrong directory layout. The anchor is the filesystem/external path the doc references. | `"docs/old-thing.md"` or `"examples/preview_url_demo.bot"` |
 
 Hallucinating a kind outside the enum fails schema validation and
 triggers iterion's parse_fallback retry path — pick from the

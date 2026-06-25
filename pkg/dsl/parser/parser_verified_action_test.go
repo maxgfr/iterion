@@ -20,7 +20,7 @@ func TestParseVerifiedActionQuad(t *testing.T) {
     model: "anthropic/claude-sonnet-4-6"
     agent_tools: [bash, read_file]
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	if len(res.File.Tools) != 1 {
@@ -46,7 +46,7 @@ func TestParseToolNodeNoQuad(t *testing.T) {
 	src := `tool plain:
   command: "echo ok"
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 	tn := res.File.Tools[0]
 	if tn.Goal != "" || tn.Postcondition != "" || tn.Policy != "" || tn.Recovery != nil {
@@ -63,7 +63,7 @@ func TestParseRecoveryUnknownProperty(t *testing.T) {
   recovery:
     bogus_field: 3
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	if !hasDiagCode(res, parser.DiagUnknownProperty) {
 		t.Fatalf("expected DiagUnknownProperty for bogus recovery field, got %v", res.Diagnostics)
 	}

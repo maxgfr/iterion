@@ -799,7 +799,7 @@ func TestExecutorToolNodeEnvVarInjectionAfterEscape(t *testing.T) {
 
 // TestExecutorToolNodeEnvVarInTemplateStillExpands ensures the legitimate
 // use case (env vars in the author's command template) still works after
-// the ExpandEnv re-ordering. Workflows like rust_to_go_port.iter rely on
+// the ExpandEnv re-ordering. Workflows like rust_to_go_port.bot rely on
 // `export PATH=...:$PATH && cd {{input.dir}} && go build` — the $PATH in
 // the static template must still be expanded.
 func TestExecutorToolNodeEnvVarInTemplateStillExpands(t *testing.T) {
@@ -1891,7 +1891,7 @@ func TestSetVars(t *testing.T) {
 }
 
 // TestNewClawExecutorSeedsVarsDefaults verifies that workflow-declared
-// var defaults from the .iter `vars:` block are seeded into the
+// var defaults from the .bot `vars:` block are seeded into the
 // executor's vars map at construction, so prompt templates that
 // reference {{vars.X}} for an unoverridden var with a default render
 // the default value rather than the literal "{{vars.X}}" placeholder.

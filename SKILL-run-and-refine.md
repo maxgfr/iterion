@@ -1,12 +1,12 @@
 ---
 name: iterion-run-and-refine
 description: >
-  Use when asked to test, run, debug, or optimize an .iter workflow against
+  Use when asked to test, run, debug, or optimize a .bot workflow against
   real data. Covers the full cycle: launch a run, observe behavior, diagnose
   failures, fix the workflow or engine, resume, and iterate until the workflow
   runs reliably and produces quality results. Applies to any workflow type:
   porting, implementation, review, analysis, or custom orchestration.
-  Triggers on: "run this workflow", "test the .iter", "debug the run",
+  Triggers on: "run this workflow", "test the .bot", "debug the run",
   "optimize the pipeline", "why did the workflow fail", "improve convergence",
   "the workflow is stuck in a loop".
 version: 0.1.0
@@ -14,7 +14,7 @@ version: 0.1.0
 
 # Running and Refining Iterion Workflows
 
-This skill covers the practice of taking any .iter workflow from "validates OK" to "runs reliably and produces quality results at scale." It applies to all workflow types — porting pipelines, implementation loops, review chains, analysis workflows, or any custom orchestration.
+This skill covers the practice of taking any .bot workflow from "validates OK" to "runs reliably and produces quality results at scale." It applies to all workflow types — porting pipelines, implementation loops, review chains, analysis workflows, or any custom orchestration.
 
 The approach is experimental and iterative: launch, observe, diagnose, fix, resume. It is based on hard-won experience running multi-hour, multi-batch workflows against real codebases.
 
@@ -28,7 +28,7 @@ The refinement process is not linear. It follows a tight observe → diagnose �
 3. When something fails or stagnates:
    a. Read the error or inspect the verdict
    b. Diagnose the root cause (workflow design? prompt? engine bug? infra?)
-   c. Fix the .iter file (or engine code if needed)
+   c. Fix the .bot file (or engine code if needed)
    d. Update the companion .md with what you learned and why you changed it
    e. Resume from the last checkpoint with --force
 4. Repeat until the workflow runs end-to-end
@@ -41,7 +41,7 @@ This is not a one-shot process. Expect 5-15 iterations before a complex workflow
 
 ## The companion document
 
-Every .iter workflow should have a **companion .md file with the same basename** (e.g., `rust_to_go_port.iter` → `rust_to_go_port.md`). This document is not optional boilerplate — it is a living record of the refinement process.
+Every .bot workflow should have a **companion .md file with the same basename** (e.g., `rust_to_go_port.bot` → `rust_to_go_port.md`). This document is not optional boilerplate — it is a living record of the refinement process.
 
 ### What it contains
 
@@ -75,7 +75,7 @@ See [examples/rust_to_go_port.md](examples/rust_to_go_port.md) for a real exampl
 set -a && source .env && set +a
 
 # Run with variables
-./iterion run examples/my_workflow.iter \
+./iterion run examples/my_workflow.bot \
   --var repo_path="/path/to/repo" \
   --store-dir .my-store \
   --log-level info \
@@ -86,7 +86,7 @@ Run in the background to keep working while it runs. **Always provide the user w
 
 ```bash
 # Background execution — note the output file
-./iterion run examples/my_workflow.iter [...] 2>&1 &
+./iterion run examples/my_workflow.bot [...] 2>&1 &
 # The output goes to a temp file — give the user this command:
 tail -f /path/to/output/file
 ```
@@ -149,17 +149,17 @@ This is the most important capability. Every failure is an opportunity to fix an
 
 ```bash
 # Resume a failed run (re-executes the failing node)
-./iterion resume --run-id <id> --file workflow.iter --store-dir .my-store
+./iterion resume --run-id <id> --file workflow.bot --store-dir .my-store
 
-# Resume after editing the .iter file (--force bypasses hash check)
-./iterion resume --run-id <id> --file workflow.iter --store-dir .my-store --force
+# Resume after editing the .bot file (--force bypasses hash check)
+./iterion resume --run-id <id> --file workflow.bot --store-dir .my-store --force
 
 # Resume a paused run with human answers
-./iterion resume --run-id <id> --file workflow.iter --store-dir .my-store \
+./iterion resume --run-id <id> --file workflow.bot --store-dir .my-store \
   --answers-file answers.json
 ```
 
-**Critical: always use `--force` after editing the .iter file.** Without it, the hash mismatch rejects the resume.
+**Critical: always use `--force` after editing the .bot file.** Without it, the hash mismatch rejects the resume.
 
 **Answers must use correct JSON types.** `--answer 'proceed=true'` passes a string. Use `--answers-file` with a JSON file for booleans:
 ```json
@@ -181,10 +181,10 @@ print(d['status'], d.get('checkpoint', {}).get('node_id', ''))
 2. **Resume based on status:**
 ```bash
 # failed_resumable — just resume (re-executes the failing node)
-./iterion resume --run-id <id> --file workflow.iter --store-dir .my-store --force --log-level info
+./iterion resume --run-id <id> --file workflow.bot --store-dir .my-store --force --log-level info
 
 # paused_waiting_human — needs answers
-./iterion resume --run-id <id> --file workflow.iter --store-dir .my-store --force \
+./iterion resume --run-id <id> --file workflow.bot --store-dir .my-store --force \
   --answers-file answers.json --log-level info
 
 # running — the process may still be alive. Check before resuming:
@@ -260,7 +260,7 @@ cd <target_repo> && git status
 
 **Cause:** When a loop-bounded edge is exhausted, the runtime skips it. If no other edge matches, the node has no exit.
 
-**Fix:** Always add a fallback edge after loop-bounded edges. The edge evaluation order in the .iter file is the edge priority:
+**Fix:** Always add a fallback edge after loop-bounded edges. The edge evaluation order in the .bot file is the edge priority:
 ```iter
 verdict -> done when overall_parity           # 1. done if complete
 verdict -> plan when batch_complete            # 2. next batch
@@ -348,7 +348,7 @@ The `llm_or_human` interaction mode on a plan gate lets an LLM decide whether to
 
 5. **Budget generously on first runs** — `max_cost_usd: 500`, `max_tokens: 50000000`, `max_iterations: 100`. Tighten after you understand the workflow's behavior.
 
-6. **The `--force` flag is your best friend** — every fix to the .iter file can be applied immediately via resume without losing work.
+6. **The `--force` flag is your best friend** — every fix to the .bot file can be applied immediately via resume without losing work.
 
 7. **Keep the answers file ready** — for workflows with human gates, pre-create an approval JSON file so you can resume quickly:
    ```json
@@ -377,7 +377,7 @@ These patterns were discovered during live runs and are now built into the workf
 
 ## See Also
 
-- [SKILL.md](SKILL.md) — DSL reference for writing .iter files
+- [SKILL.md](SKILL.md) — DSL reference for writing .bot files
 - [examples/rust_to_go_port.md](examples/rust_to_go_port.md) — detailed design notes for a production workflow
 - [docs/resume.md](docs/resume.md) — exhaustive failure matrix and resume semantics
 - [examples/](examples/) — workflow examples of increasing complexity

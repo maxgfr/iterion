@@ -22,7 +22,7 @@ presets:
     debug: false
     retries: 5
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	pb := res.File.Presets
@@ -57,7 +57,7 @@ presets:
     ratio: 0.95
     label: "speed"
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	assertNoDiags(t, res)
 
 	pb := res.File.Presets

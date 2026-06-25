@@ -184,7 +184,7 @@ func (s *Service) Launch(parent context.Context, spec LaunchSpec) (*LaunchResult
 }
 
 // Resume re-enters a paused, failed_resumable, or cancelled run with
-// optional answers. The .iter source must be supplied (and must hash-
+// optional answers. The .bot source must be supplied (and must hash-
 // match the original unless spec.Force).
 func (s *Service) Resume(parent context.Context, spec ResumeSpec) (*LaunchResult, error) {
 	if s.draining.Load() {
@@ -243,7 +243,7 @@ func (s *Service) Resume(parent context.Context, spec ResumeSpec) (*LaunchResult
 	}
 
 	// Honour spec.Source when supplied (cloud-mode callers materialise
-	// .iter contents inline; the runner pod may have no FilePath on
+	// .bot contents inline; the runner pod may have no FilePath on
 	// disk). The publish path above already uses compileForLaunch for
 	// the same reason — this branch was the only one still routing
 	// through the disk-only CompileWorkflowWithHash.

@@ -74,10 +74,10 @@ func TestService_Drain_FlipsStatusAndEmitsEvent(t *testing.T) {
 	}
 
 	// Subsequent Launch / Resume must return ErrServerDraining.
-	if _, err := svc.Launch(context.Background(), LaunchSpec{FilePath: "irrelevant.iter"}); !errors.Is(err, runtime.ErrServerDraining) {
+	if _, err := svc.Launch(context.Background(), LaunchSpec{FilePath: "irrelevant.bot"}); !errors.Is(err, runtime.ErrServerDraining) {
 		t.Errorf("Launch after Drain = %v, want ErrServerDraining", err)
 	}
-	if _, err := svc.Resume(context.Background(), ResumeSpec{RunID: "run-drain-1", FilePath: "irrelevant.iter"}); !errors.Is(err, runtime.ErrServerDraining) {
+	if _, err := svc.Resume(context.Background(), ResumeSpec{RunID: "run-drain-1", FilePath: "irrelevant.bot"}); !errors.Is(err, runtime.ErrServerDraining) {
 		t.Errorf("Resume after Drain = %v, want ErrServerDraining", err)
 	}
 }

@@ -20,7 +20,7 @@ import (
 
 // RegisterClawBuiltins registers the standard claw-code-go built-in tools
 // against the given Registry, making them callable by claw-backend agents
-// that declare e.g. `tools: [read_file, write_file, bash]` in their .iter
+// that declare e.g. `tools: [read_file, write_file, bash]` in their .bot
 // fixture.
 //
 // Workspace is forwarded to the bash tool for command validation; pass an

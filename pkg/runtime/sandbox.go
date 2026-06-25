@@ -912,7 +912,7 @@ func fromIRSpec(s *ir.SandboxSpec) sandbox.Spec {
 // expansion (${localEnv:VAR}, ${localWorkspaceFolder*}) to every
 // host-relevant field of an inline sandbox.Spec. Mirrors
 // devcontainer.ExpandLocalVarsInFile but operates on the runtime
-// shape so inline blocks in .iter files behave identically.
+// shape so inline blocks in .bot files behave identically.
 //
 // Container-side vars (${containerEnv:...}, ${containerWorkspaceFolder*})
 // are intentionally left as-is — they're resolved at runtime by

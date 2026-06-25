@@ -10,7 +10,7 @@
 ##   5. Fix avec reprise de session du reviewer -> retour review
 ##
 ## Usage :
-##   iterion run examples/pr_review_fix.iter \
+##   iterion run examples/pr_review_fix.bot \
 ##     --var base_ref="origin/main" \
 ##     --var head_ref="HEAD" \
 ##     --var review_rules="- Code lisible et maintenable\n- Pas de failles de securite\n- Tests presents pour les nouveaux comportements\n- Pas de regression de performance\n- Nommage coherent avec le reste du codebase"

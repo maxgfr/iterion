@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-04-01
 - **Authors**: devthejo
-- **Workflow context**: [`.archive/examples/dual_model_plan_implement_review.iter`](../../.archive/examples/dual_model_plan_implement_review.iter) (archived)
+- **Workflow context**: [`e2e/testdata/dual_model_plan_implement_review.bot`](../../e2e/testdata/dual_model_plan_implement_review.bot) (archived)
 
 ## Context
 
@@ -18,7 +18,7 @@ of a loop (e.g. Claude refines on turn 1, Codex on turn 2), the v1 DSL
 forces a **cross-pair pattern**: structurally duplicating the nodes and
 crossing the rejection edges between the two pairs.
 
-This pattern surfaced while designing the `dual_model_plan_implement_review.iter`
+This pattern surfaced while designing the `dual_model_plan_implement_review.bot`
 workflow, which orchestrates:
 - Parallel planning (Claude + Codex) with a Claude-driven merge
 - A validation/refinement loop with the refiner alternating between models
@@ -31,7 +31,7 @@ workflow, which orchestrates:
 |---|---|---|
 | Nodes | 46 | ~23 |
 | Edges | 60 | ~30 |
-| `.iter` lines | ~550 | ~280 |
+| `.bot` lines | ~550 | ~280 |
 | Duplicated prompts | 0 (shared) | 0 |
 | Duplicated nodes | 23 (everything except prompts/schemas) | 0 |
 
@@ -91,7 +91,7 @@ On the third pass: `claude_refine` again. And so on.
 
 ### Simplified workflow
 
-With `round_robin`, the `dual_model_plan_implement_review.iter` workflow
+With `round_robin`, the `dual_model_plan_implement_review.bot` workflow
 collapses to:
 
 ```
@@ -112,7 +112,7 @@ plan_fanout (fan_out_all) → claude_plan + codex_plan → plans_converge → me
 ### 1. Status quo — cross-pair pattern only
 
 The cross-pair pattern works and requires no runtime changes. It is used
-in existing examples such as [`.archive/examples/feature_request_dual_model.iter`](../../.archive/examples/feature_request_dual_model.iter).
+in existing examples such as [`e2e/testdata/feature_request_dual_model.bot`](../../e2e/testdata/feature_request_dual_model.bot).
 
 **Rejected because**: duplication grows combinatorially. Alternation
 between 2 agents doubles the node count. With 3 agents the cross-pair
@@ -143,7 +143,7 @@ use case (deterministic alternation) more simply.
 
 ### 1. Drastic surface reduction
 
-Half of the `dual_model_plan_implement_review.iter` file is structural
+Half of the `dual_model_plan_implement_review.bot` file is structural
 boilerplate that adds nothing for the reader. Each duplicated node has
 exactly the same delegate, the same prompts, the same schemas — only its
 name differs to anchor different edges.
@@ -291,9 +291,9 @@ func (e *Engine) execRouter(ctx context.Context, rs *RunState, nodeID string) (s
 ### Migration of existing workflows
 
 Once `round_robin` is implemented, the
-`dual_model_plan_implement_review.iter` workflow can be simplified from
+`dual_model_plan_implement_review.bot` workflow can be simplified from
 46 to 23 nodes. Existing examples that use the cross-pair pattern (e.g.
-[`.archive/examples/feature_request_dual_model.iter`](../../.archive/examples/feature_request_dual_model.iter))
+[`e2e/testdata/feature_request_dual_model.bot`](../../e2e/testdata/feature_request_dual_model.bot))
 remain valid — cross-pair is a usage pattern, not a DSL constraint.
 
 ## Consequences
@@ -330,5 +330,5 @@ For new workflows using `round_robin`, prefer alternating between:
   `openai/gpt-...`).
 
 Historical examples that used `codex` in this role have been migrated in
-the same commit; see [`.archive/examples/dual_model_plan_implement_review.iter`](../../.archive/examples/dual_model_plan_implement_review.iter)
+the same commit; see [`e2e/testdata/dual_model_plan_implement_review.bot`](../../e2e/testdata/dual_model_plan_implement_review.bot)
 for the current (archived) version.

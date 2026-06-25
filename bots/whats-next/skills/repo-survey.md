@@ -51,7 +51,7 @@ Always read (if present): `README.md`, `CLAUDE.md`,
 `CONTRIBUTING.md`. Capture in `summary`:
 - Product framing (1 sentence)
 - Build / test entry point (e.g. `devbox run -- task build`)
-- The `.iter`/`.bot` distinction if iterion
+- The `.bot`/`.bot` distinction if iterion
 
 ## 3. Identify the stack → `summary` line 3–4
 
@@ -68,11 +68,11 @@ State the primary language(s) and package manager(s) so
 ## 4. Discover bots → `summary` line 5 + downstream signal
 
 This is **the** field `propose_roadmap` needs most. List every
-`.bot` / `.iter` / `.botz` file in the workspace:
+`.bot` / `.bot` / `.botz` file in the workspace:
 
 ```bash
 find "$WORKSPACE" -maxdepth 4 \
-  \( -name '*.bot' -o -name '*.iter' -o -name '*.botz' \) \
+  \( -name '*.bot' -o -name '*.bot' -o -name '*.botz' \) \
   -not -path '*/vendor/*' -not -path '*/.iterion/*' \
   -printf '%P\n' | sort
 ```

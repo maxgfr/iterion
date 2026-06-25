@@ -1,5 +1,5 @@
 ## Minimal workflow demonstrating cursor activation.
-## Run with: iterion run examples/cursors/sample.iter
+## Run with: iterion run examples/cursors/sample.bot
 
 cursor ambition:
   description: "How aggressively to expand scope beyond the stated request."

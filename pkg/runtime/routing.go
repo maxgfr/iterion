@@ -107,7 +107,7 @@ func (e *Engine) execLLMRouter(ctx context.Context, rs *runState, routerNodeID s
 	routerInput := e.buildNodeInputRS(routerNodeID, rs.scope())
 
 	// Collect outgoing edge targets as candidates.
-	// NOTE: order follows edge declaration order in the .iter file, which the
+	// NOTE: order follows edge declaration order in the .bot file, which the
 	// LLM sees in its prompt. This is deterministic but may introduce ordering
 	// bias in the LLM's selection.
 	var candidates []string

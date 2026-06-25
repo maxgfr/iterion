@@ -1,6 +1,6 @@
 # Iterion DSL — Common Workflow Patterns
 
-Reusable patterns for building `.iter` workflows. Each pattern includes a skeleton snippet and explanation.
+Reusable patterns for building `.bot` workflows. Each pattern includes a skeleton snippet and explanation.
 
 ---
 

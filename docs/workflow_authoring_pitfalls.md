@@ -1,6 +1,6 @@
 # Workflow Authoring Pitfalls
 
-Hard-won lessons for authoring `.iter` workflows where LLM agents do real work
+Hard-won lessons for authoring `.bot` workflows where LLM agents do real work
 on real codebases. Read this **before** writing or amending an iteration
 workflow that has the power to commit code.
 
@@ -87,7 +87,7 @@ do that work, and nothing in the workflow forced it to.
 
 ### Why the workflow let it pass
 
-Five concrete defects in the `.iter`:
+Five concrete defects in the `.bot`:
 
 1. **The goal in `port_plan_system` was ambiguous.** "Replace iterion's
    native goai layer with claw-code-go" can mean (a) iterion's source
@@ -142,7 +142,7 @@ A workflow that would have caught this:
 - **Architectural scanner in `parity_scan_system`**:
   > Migration is complete when ALL of:
   > - `grep -r "github.com/zendev-sh/goai" --include='*.go'` returns 0
-  >   in iterion's source (excluding `vendor/` and the workflow `.iter`)
+  >   in iterion's source (excluding `vendor/` and the workflow `.bot`)
   > - `grep -r "github.com/zendev-sh/goai" --include='*.go'` returns 0
   >   in claw-code-go's **source** (the upstream repo, NOT iterion's
   >   vendored copy)
@@ -154,7 +154,7 @@ A workflow that would have caught this:
 
 ---
 
-## Authoring checklist for `.iter` workflows that touch real code
+## Authoring checklist for `.bot` workflows that touch real code
 
 ### Before writing the workflow
 
@@ -390,7 +390,7 @@ Sharper prompts up front would have cut that in half.
 
 ## Shell portability for tool nodes
 
-`.iter` `tool` nodes execute their `command:` string via
+`.bot` `tool` nodes execute their `command:` string via
 `exec.Command("sh", "-c", …)` (see `pkg/backend/model/executor.go`,
 `executeToolNodeShell`). The crucial detail: **`sh` resolves to whatever
 binary `sh` points at in the runtime PATH.** It is *not* a fixed
@@ -408,7 +408,7 @@ This means the same workflow can behave differently across hosts:
 
 ### The brace-expansion gotcha (real, observed)
 
-`run_console_demo.iter` originally contained:
+`run_console_demo.bot` originally contained:
 
 ```
 echo {"count":3,"done":false}
@@ -442,7 +442,7 @@ of the following:
 | `${var^^}` / `${var,,}` | `printf '%s' "$var" \| tr a-z A-Z` |
 
 For JSON output specifically, the safest pattern landed on in
-`run_console_demo.iter`:
+`run_console_demo.bot`:
 
 ```
 echo \{\"count\":$(wc -c < /tmp/counter),\"done\":false\}
@@ -450,7 +450,7 @@ echo \{\"count\":$(wc -c < /tmp/counter),\"done\":false\}
 
 Every `{`, `}`, and `"` is backslash-escaped. The braces are escaped
 to defeat brace expansion under bash; the quotes are escaped to
-survive the outer YAML/`.iter` string-literal layer plus `sh -c`.
+survive the outer YAML/`.bot` string-literal layer plus `sh -c`.
 
 Alternative: produce JSON via `printf '{"count":%d,"done":false}\n' N`.
 `printf` is POSIX, has no brace expansion semantics, and reads as

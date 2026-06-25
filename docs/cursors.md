@@ -134,7 +134,7 @@ ignore validation.
 ## Reference catalogue
 
 Four reference cursors live at
-[examples/cursors/cursors.iter](../examples/cursors/cursors.iter):
+[examples/cursors/cursors.bot](../examples/cursors/cursors.bot):
 
 - **`ambition`** — how aggressively to expand scope beyond the stated request
 - **`depth`** — investigation thoroughness, 0.0 (skim) → 1.0 (exhaustive)
@@ -142,7 +142,7 @@ Four reference cursors live at
 - **`autonomy`** — escalation threshold (`gated` → `autonomous`)
 
 These are copy-paste-ready snippets, not a runnable workflow.
-[examples/cursors/sample.iter](../examples/cursors/sample.iter) is
+[examples/cursors/sample.bot](../examples/cursors/sample.bot) is
 a minimal validatable workflow that exercises two of them.
 
 ## Authoring guidance

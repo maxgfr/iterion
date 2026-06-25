@@ -233,7 +233,7 @@ curl -X POST https://iterion.example.com/api/runs/$RUN_ID/resume \
   -H "Authorization: Bearer $ITERION_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "source": "'"$(jq -Rs . workflow.iter)"'",
+    "source": "'"$(jq -Rs . workflow.bot)"'",
     "answers": {"approved": true},
     "force": false
   }'

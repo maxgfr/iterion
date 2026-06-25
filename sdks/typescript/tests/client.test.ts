@@ -81,43 +81,43 @@ describe("IterionClient", () => {
   // ---- validate ----------------------------------------------------------
 
   it("validate() parses the structured envelope on success", async () => {
-    const got = await client({ FAKE_ITERION_SCENARIO: "validate-ok" }).validate("demo.iter");
+    const got = await client({ FAKE_ITERION_SCENARIO: "validate-ok" }).validate("demo.bot");
     expect(got.valid).toBe(true);
     expect(got.workflow_name).toBe("demo");
-    expect(got.file).toBe("demo.iter");
+    expect(got.file).toBe("demo.bot");
     expect(got.node_count).toBe(3);
     expect(got.edge_count).toBe(2);
     const calls = await readCalls(recordPath);
-    expect(calls[0]?.argv).toEqual(["--json", "validate", "demo.iter"]);
+    expect(calls[0]?.argv).toEqual(["--json", "validate", "demo.bot"]);
   });
 
   it("validate() surfaces diagnostics even when the CLI double-writes JSON on failure", async () => {
     // The real CLI writes the structured ValidateResult envelope and is
     // followed by `{"error":"validation failed"}` on stdout. The SDK must
     // return the first envelope so consumers can see parse_diagnostics.
-    const got = await client({ FAKE_ITERION_SCENARIO: "validate-fail" }).validate("bad.iter");
+    const got = await client({ FAKE_ITERION_SCENARIO: "validate-fail" }).validate("bad.bot");
     expect(got.valid).toBe(false);
-    expect(got.file).toBe("bad.iter");
+    expect(got.file).toBe("bad.bot");
     expect(got.parse_diagnostics).toEqual([
-      "bad.iter:1:14: error [E002]: expected :, got Newline",
-      "bad.iter:2:1: error [E002]: expected INDENT, got EOF",
+      "bad.bot:1:14: error [E002]: expected :, got Newline",
+      "bad.bot:2:1: error [E002]: expected INDENT, got EOF",
     ]);
   });
 
   it("validate() throws on pre-validation error envelopes", async () => {
     await expect(
       client({ FAKE_ITERION_SCENARIO: "validate-error-envelope" }).validate(
-        "/tmp/definitely-no-such-file.iter",
+        "/tmp/definitely-no-such-file.bot",
       ),
     ).rejects.toMatchObject({
       name: "IterionInvocationError",
       exitCode: 1,
       stdout: expect.stringContaining("cannot read file"),
-      args: ["--json", "validate", "/tmp/definitely-no-such-file.iter"],
+      args: ["--json", "validate", "/tmp/definitely-no-such-file.bot"],
     });
     await expect(
       client({ FAKE_ITERION_SCENARIO: "validate-error-envelope" }).validate(
-        "/tmp/definitely-no-such-file.iter",
+        "/tmp/definitely-no-such-file.bot",
       ),
     ).rejects.toThrow(/iterion validate exited with code 1/);
   });
@@ -126,7 +126,7 @@ describe("IterionClient", () => {
 
   it("run() returns the parsed result on finished", async () => {
     const result = await client({ FAKE_ITERION_SCENARIO: "run-finished" }).run(
-      "demo.iter",
+      "demo.bot",
       { vars: { repo: "x", branch: "main" }, logLevel: "info" },
     );
     expect(result.status).toBe("finished");
@@ -136,7 +136,7 @@ describe("IterionClient", () => {
     const argv = calls[0]!.argv;
     expect(argv[0]).toBe("--json");
     expect(argv[1]).toBe("run");
-    expect(argv[2]).toBe("demo.iter");
+    expect(argv[2]).toBe("demo.bot");
     expect(argv).toContain("--var");
     expect(argv).toContain("repo=x");
     expect(argv).toContain("branch=main");
@@ -146,7 +146,7 @@ describe("IterionClient", () => {
   });
 
   it("run() returns paused result without throwing", async () => {
-    const result = await client({ FAKE_ITERION_SCENARIO: "run-paused" }).run("demo.iter");
+    const result = await client({ FAKE_ITERION_SCENARIO: "run-paused" }).run("demo.bot");
     expect(result.status).toBe("paused_waiting_human");
     if (result.status === "paused_waiting_human") {
       expect(result.interaction_id).toBe("run_1_review");
@@ -162,7 +162,7 @@ describe("IterionClient", () => {
     // the typed mapping; this test pins the parseFirstJSON contract that
     // makes the structured status survive.
     await expect(
-      client({ FAKE_ITERION_SCENARIO: "run-failed" }).run("demo.iter"),
+      client({ FAKE_ITERION_SCENARIO: "run-failed" }).run("demo.bot"),
     ).rejects.toMatchObject({
       name: "IterionRuntimeError",
       code: "BUDGET_EXCEEDED",
@@ -182,7 +182,7 @@ describe("IterionClient", () => {
         // Drop the stderr preamble so parseRuntimeError(stderr) returns
         // null and we exercise the EXECUTION_FAILED fallback path.
         FAKE_ITERION_STDERR: "",
-      }).run("demo.iter"),
+      }).run("demo.bot"),
     ).rejects.toMatchObject({
       name: "IterionRuntimeError",
       code: "EXECUTION_FAILED",
@@ -194,7 +194,7 @@ describe("IterionClient", () => {
     // The run-cancelled fixture also double-writes (structured envelope
     // + bare `{error:"run cancelled"}`). Default behaviour for cancelled
     // is to return the typed result rather than throw.
-    const result = await client({ FAKE_ITERION_SCENARIO: "run-cancelled" }).run("demo.iter");
+    const result = await client({ FAKE_ITERION_SCENARIO: "run-cancelled" }).run("demo.bot");
     expect(result.status).toBe("cancelled");
     expect(result.run_id).toBe("run_1");
   });
@@ -205,19 +205,19 @@ describe("IterionClient", () => {
     // must surface this as an exception rather than silently returning a
     // header-less RunResult whose `run_id` and `status` are undefined.
     await expect(
-      client({ FAKE_ITERION_SCENARIO: "run-error-envelope" }).run("bad.iter"),
+      client({ FAKE_ITERION_SCENARIO: "run-error-envelope" }).run("bad.bot"),
     ).rejects.toMatchObject({
       name: "IterionInvocationError",
       exitCode: 1,
     });
     await expect(
-      client({ FAKE_ITERION_SCENARIO: "run-error-envelope" }).run("bad.iter"),
+      client({ FAKE_ITERION_SCENARIO: "run-error-envelope" }).run("bad.bot"),
     ).rejects.toThrow(/parse error/);
   });
 
   it("run() throwOn=['paused_waiting_human'] raises IterionRunPausedSignal", async () => {
     await expect(
-      client({ FAKE_ITERION_SCENARIO: "run-paused" }).run("demo.iter", {
+      client({ FAKE_ITERION_SCENARIO: "run-paused" }).run("demo.bot", {
         throwOn: ["paused_waiting_human"],
       }),
     ).rejects.toBeInstanceOf(IterionRunPausedSignal);
@@ -225,14 +225,14 @@ describe("IterionClient", () => {
 
   it("run() throwOn=['cancelled'] raises a runtime error", async () => {
     await expect(
-      client({ FAKE_ITERION_SCENARIO: "run-cancelled" }).run("demo.iter", {
+      client({ FAKE_ITERION_SCENARIO: "run-cancelled" }).run("demo.bot", {
         throwOn: ["cancelled"],
       }),
     ).rejects.toBeInstanceOf(IterionRuntimeError);
   });
 
   it("run() formats numeric timeout as milliseconds", async () => {
-    await client({ FAKE_ITERION_SCENARIO: "run-finished" }).run("demo.iter", {
+    await client({ FAKE_ITERION_SCENARIO: "run-finished" }).run("demo.bot", {
       timeout: 30_000,
     });
     const calls = await readCalls(recordPath);
@@ -243,7 +243,7 @@ describe("IterionClient", () => {
   });
 
   it("run() passes through string timeout verbatim (Go duration)", async () => {
-    await client({ FAKE_ITERION_SCENARIO: "run-finished" }).run("demo.iter", {
+    await client({ FAKE_ITERION_SCENARIO: "run-finished" }).run("demo.bot", {
       timeout: "5m",
     });
     const calls = await readCalls(recordPath);
@@ -259,7 +259,7 @@ describe("IterionClient", () => {
         FAKE_ITERION_RECORD: recordPath,
         FAKE_ITERION_SCENARIO: "run-finished",
       },
-    }).run("demo.iter");
+    }).run("demo.bot");
     const calls = await readCalls(recordPath);
     const argv = calls[0]!.argv;
     expect(argv[argv.indexOf("--store-dir") + 1]).toBe("/tmp/iterion-default");
@@ -270,7 +270,7 @@ describe("IterionClient", () => {
   it("resume() builds the right argv for string answers", async () => {
     const got = await client({ FAKE_ITERION_SCENARIO: "resume-finished" }).resume({
       runId: "run_1",
-      file: "demo.iter",
+      file: "demo.bot",
       answers: { approve: "yes", reason: "looks good" },
       force: true,
     });
@@ -282,7 +282,7 @@ describe("IterionClient", () => {
     expect(argv).toContain("--run-id");
     expect(argv).toContain("run_1");
     expect(argv).toContain("--file");
-    expect(argv).toContain("demo.iter");
+    expect(argv).toContain("demo.bot");
     expect(argv).toContain("--force");
     expect(argv.filter((a) => a === "--answer").length).toBe(2);
     expect(argv).toContain("approve=yes");
@@ -294,7 +294,7 @@ describe("IterionClient", () => {
   it("resume() materialises non-string answers into a temp --answers-file", async () => {
     await client({ FAKE_ITERION_SCENARIO: "resume-finished" }).resume({
       runId: "run_1",
-      file: "demo.iter",
+      file: "demo.bot",
       answers: { approve: true, score: 0.9, note: "fine" },
     });
     const calls = await readCalls(recordPath);
@@ -321,7 +321,7 @@ describe("IterionClient", () => {
     await expect(
       client({ FAKE_ITERION_SCENARIO: "resume-failed" }).resume({
         runId: "run_1",
-        file: "demo.iter",
+        file: "demo.bot",
       }),
     ).rejects.toMatchObject({
       name: "IterionRuntimeError",
@@ -334,7 +334,7 @@ describe("IterionClient", () => {
     await expect(
       client({ FAKE_ITERION_SCENARIO: "resume-error-envelope" }).resume({
         runId: "non_existent",
-        file: "demo.iter",
+        file: "demo.bot",
       }),
     ).rejects.toMatchObject({
       name: "IterionInvocationError",
@@ -369,11 +369,11 @@ describe("IterionClient", () => {
   });
 
   it("diagram() forwards --view", async () => {
-    await client({ FAKE_ITERION_SCENARIO: "diagram" }).diagram("demo.iter", {
+    await client({ FAKE_ITERION_SCENARIO: "diagram" }).diagram("demo.bot", {
       view: "detailed",
     });
     const calls = await readCalls(recordPath);
-    expect(calls[0]?.argv).toEqual(["--json", "diagram", "demo.iter", "--view", "detailed"]);
+    expect(calls[0]?.argv).toEqual(["--json", "diagram", "demo.bot", "--view", "detailed"]);
   });
 
   it("report() requires --run-id", async () => {
@@ -391,7 +391,7 @@ describe("IterionClient", () => {
       env: { FAKE_ITERION_DELAY_MS: "5000", FAKE_ITERION_SCENARIO: "run-finished" },
       signal: ac.signal,
     });
-    const p = c.run("demo.iter");
+    const p = c.run("demo.bot");
     setTimeout(() => ac.abort(), 50);
     await expect(p).rejects.toBeInstanceOf(IterionInvocationError);
   });

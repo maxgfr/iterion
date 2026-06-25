@@ -23,7 +23,7 @@ var botFileNames = []string{"main.bot"}
 func Detect(path string) (Kind, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return KindIter, fmt.Errorf("bundle: stat %s: %w", path, err)
+		return KindBot, fmt.Errorf("bundle: stat %s: %w", path, err)
 	}
 	if info.IsDir() {
 		// Directory bundle: look for `main.bot` at the root.
@@ -32,16 +32,16 @@ func Detect(path string) (Kind, error) {
 				return KindBundleDir, nil
 			}
 		}
-		return KindIter, fmt.Errorf("bundle: %s is a directory but contains no main.bot at root", path)
+		return KindBot, fmt.Errorf("bundle: %s is a directory but contains no main.bot at root", path)
 	}
 	lower := strings.ToLower(path)
 	if strings.HasSuffix(lower, ".botz") {
 		return KindBundle, nil
 	}
 	if workflowfile.IsWorkflowFile(lower) {
-		return KindIter, nil
+		return KindBot, nil
 	}
-	return KindIter, fmt.Errorf("bundle: unsupported workflow extension for %s (expected .bot or .botz)", path)
+	return KindBot, fmt.Errorf("bundle: unsupported workflow extension for %s (expected .bot or .botz)", path)
 }
 
 // Open loads a `.botz` archive from path, extracting it to a stable

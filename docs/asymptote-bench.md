@@ -106,7 +106,7 @@ Multi-family alternation is **not** the default thesis. The asymptote thesis is 
 2. **Small samples lie**. With n < 5 the per-iteration mean is dominated by which run reached that iter. The bench prints the count column for exactly this reason — read it.
 3. **Different workflows aren't comparable**. The asymptote of workflow A isn't the asymptote of workflow B. Variant comparisons must hold the workflow constant on both sides; only the recipe should differ.
 4. **Loop name auto-detection**. By default the parser anchors on the *first* loop it observes that touches the judge. If your workflow has multiple loops sharing the judge, pass `--loop <name>` explicitly.
-5. **Backend tagging is workflow-side, not event-side**. The bench currently doesn't introspect which backend each iteration used — that lives in the workflow's `.iter` source. To distinguish single-family vs multi-family runs, label them on the CLI (`--label`/`--variant-label`) rather than expecting the bench to infer it.
+5. **Backend tagging is workflow-side, not event-side**. The bench currently doesn't introspect which backend each iteration used — that lives in the workflow's `.bot` source. To distinguish single-family vs multi-family runs, label them on the CLI (`--label`/`--variant-label`) rather than expecting the bench to infer it.
 
 ## What's not here yet
 

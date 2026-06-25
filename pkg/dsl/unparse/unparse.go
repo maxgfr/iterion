@@ -1,4 +1,4 @@
-// Package unparse converts an ast.File back into .iter DSL text.
+// Package unparse converts an ast.File back into .bot DSL text.
 package unparse
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/dsl/ir"
 )
 
-// Unparse renders an ast.File back to .iter DSL source text.
+// Unparse renders an ast.File back to .bot DSL source text.
 func Unparse(f *ast.File) string {
 	w := &fileWriter{}
 	w.writeComments(f.Comments)
@@ -833,7 +833,7 @@ func writeAgentFields(b *strings.Builder, f llmFields) {
 }
 
 // writeSandboxBlock serializes an [ast.SandboxBlock] back to its
-// canonical .iter source. Empty / nil blocks emit nothing. The short
+// canonical .bot source. Empty / nil blocks emit nothing. The short
 // form (`sandbox: ident`) is used when only Mode is set; otherwise
 // the full block form is rendered with each populated field on its
 // own line.

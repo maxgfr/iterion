@@ -11,8 +11,8 @@ Three run statuses support resume:
 | Status                 | Trigger                          | Answers required? | `--force` useful? |
 |------------------------|----------------------------------|-------------------|-------------------|
 | `paused_waiting_human` | Human node reached               | Yes               | No                |
-| `failed_resumable`     | Any non-terminal failure         | No                | Yes (if .iter changed) |
-| `cancelled`            | User interrupt (SIGINT/Ctrl-C)   | No                | Yes (if .iter changed) |
+| `failed_resumable`     | Any non-terminal failure         | No                | Yes (if .bot changed) |
+| `cancelled`            | User interrupt (SIGINT/Ctrl-C)   | No                | Yes (if .bot changed) |
 
 ## CLI Usage
 
@@ -23,7 +23,7 @@ iterion resume --run-id <id> --file workflow.bot --answers-file answers.json
 # Resume a failed run (no answers needed)
 iterion resume --run-id <id> --file workflow.bot
 
-# Resume after editing the .iter file (e.g., fixing a bug)
+# Resume after editing the .bot file (e.g., fixing a bug)
 iterion resume --run-id <id> --file workflow.bot --force
 ```
 
@@ -97,7 +97,7 @@ Every failure path in the engine, its resulting status, and whether it's resumab
 
 ## `--force` Flag
 
-By default, resume validates that the `.iter` source file has not changed since the run started (via SHA-256 hash). If it has changed, resume is refused.
+By default, resume validates that the `.bot` source file has not changed since the run started (via SHA-256 hash). If it has changed, resume is refused.
 
 The `--force` flag bypasses this check. This is useful when:
 - Fixing a bug in the workflow that caused the failure

@@ -59,7 +59,7 @@ of any `backend: claude_code` node.
 
 The five domain skills were produced by a one-shot dogfood run of
 `claw + openai/gpt-5.5` against this repository — see
-[scripts/adhoc/whats-next-skills-gen.iter](../../scripts/adhoc/whats-next-skills-gen.iter)
+[scripts/adhoc/whats-next-skills-gen.bot](../../scripts/adhoc/whats-next-skills-gen.bot)
 for the generator (the seed for a future `generate-skills.bot`).
 
 ## Prerequisites

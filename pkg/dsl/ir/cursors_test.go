@@ -46,7 +46,7 @@ workflow w:
 `
 
 func TestCursorsParseAndCompile(t *testing.T) {
-	pr := parser.Parse("test.iter", cursorsBaseWorkflow)
+	pr := parser.Parse("test.bot", cursorsBaseWorkflow)
 	if len(pr.Diagnostics) > 0 {
 		for _, d := range pr.Diagnostics {
 			t.Logf("parser diag: %+v", d)
@@ -113,7 +113,7 @@ workflow w:
   entry: x
   x -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parser should accept syntactically valid form: %+v", pr.Diagnostics)
 	}
@@ -152,7 +152,7 @@ workflow w:
   entry: x
   x -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parser diagnostics: %+v", pr.Diagnostics)
 	}
@@ -188,7 +188,7 @@ workflow w:
   entry: x
   x -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parser diagnostics: %+v", pr.Diagnostics)
 	}
@@ -224,7 +224,7 @@ workflow w:
   entry: x
   x -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	if len(pr.Diagnostics) > 0 {
 		t.Fatalf("parser diagnostics: %+v", pr.Diagnostics)
 	}

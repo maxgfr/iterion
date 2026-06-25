@@ -9,7 +9,7 @@
 #   3. User replies with "/iterion-answer" comment -> parse answers, resume workflow
 #   4. Post result as new comment
 #
-# Customize: Replace workflow.iter with your actual workflow file path.
+# Customize: Replace workflow.bot with your actual workflow file path.
 
 name: Iterion HITL
 
@@ -43,7 +43,7 @@ jobs:
       - name: Run workflow
         id: run
         run: |
-          result=$(iterion run workflow.iter \
+          result=$(iterion run workflow.bot \
             --json \
             --no-interactive \
             --var pr_number=${{ github.event.pull_request.number }} \
@@ -93,7 +93,7 @@ jobs:
               ...Object.keys(questions).map(k => `${k}: your answer here`),
               '```',
               ``,
-              `<!-- iterion:run_id=${runId} file=${result.file || 'workflow.iter'} store=.iterion interaction_id=${interactionId} -->`,
+              `<!-- iterion:run_id=${runId} file=${result.file || 'workflow.bot'} store=.iterion interaction_id=${interactionId} -->`,
             ].join('\n');
 
             await github.rest.issues.createComment({

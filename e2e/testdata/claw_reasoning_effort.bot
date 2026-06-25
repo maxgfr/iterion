@@ -1,7 +1,7 @@
 ## Fixture : claw_reasoning_effort
 ##
 ## But : prouver que `reasoning_effort: "high"` est correctement
-## propage de la declaration .iter jusqu'au request body envoye au
+## propage de la declaration .bot jusqu'au request body envoye au
 ## provider, en passant par GenerationOptions.ProviderOptions et
 ## RequestInfo.ReasoningEffort.
 ##

@@ -89,9 +89,9 @@ func TestList_MissingPathIsSkipped(t *testing.T) {
 	}
 }
 
-func TestList_IgnoresIterFilesInDirectory(t *testing.T) {
+func TestList_IgnoresNonBotFilesInDirectory(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "legacy.iter"), `## ---
+	writeFile(t, filepath.Join(dir, "notes.txt"), `## ---
 ## name: legacy
 ## ---
 `)
@@ -112,9 +112,9 @@ func TestList_IgnoresIterFilesInDirectory(t *testing.T) {
 	}
 }
 
-func TestList_RejectsIterFileRoot(t *testing.T) {
+func TestList_RejectsNonBotFileRoot(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "legacy.iter")
+	path := filepath.Join(dir, "legacy.txt")
 	writeFile(t, path, `## ---
 ## name: legacy
 ## ---
@@ -122,7 +122,7 @@ func TestList_RejectsIterFileRoot(t *testing.T) {
 
 	_, err := List(ListOptions{Paths: []string{path}})
 	if err == nil {
-		t.Fatal("expected .iter root to be rejected")
+		t.Fatal("expected non-.bot root to be rejected")
 	}
 }
 

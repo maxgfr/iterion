@@ -7,14 +7,14 @@ func TestIsWorkflowFile(t *testing.T) {
 		path string
 		want bool
 	}{
-		{"foo.iter", false},
+		{"foo.yaml", false},
 		{"foo.bot", true},
-		{"path/to/foo.iter", false},
+		{"path/to/foo.yaml", false},
 		{"path/to/foo.bot", true},
 		{"foo.txt", false},
 		{"foo", false},
-		{"foo.iter.bak", false},
-		{".iter", false},
+		{"foo.bot.bak", false},
+		{".yaml", false},
 		{".bot", true},
 		{"foo.botz", false},
 		{"", false},

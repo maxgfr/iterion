@@ -32,7 +32,7 @@ import (
 // end-to-end (not just registered, not just dispatched in isolation by
 // the in-process smoke test).
 //
-// The fixture (examples/claw_tool_coverage.iter) is structured as
+// The fixture (e2e/testdata/claw_tool_coverage.bot) is structured as
 // three sequential agents with explicit checklists in their user
 // prompt:
 //
@@ -53,7 +53,7 @@ import (
 //     produce ("Hello, Iterion!", "setatS", probe text edited).
 //
 // Tools intentionally NOT covered (and why): see the file header in
-// examples/claw_tool_coverage.iter.
+// e2e/testdata/claw_tool_coverage.bot.
 //
 // Cost on Haiku 4.5 across the three agents has been observed at
 // ~$0.03 per run.
@@ -78,7 +78,7 @@ func TestLive_ClawToolCoverage(t *testing.T) {
 	}
 	t.Setenv("ITERION_MCP_TEST_BINARY", binPath)
 
-	wf := compileFixture(t, "claw_tool_coverage.iter")
+	wf := compileFixture(t, "claw_tool_coverage.bot")
 
 	workspaceDir, err := os.MkdirTemp("", "iterion-claw-cov-*")
 	if err != nil {

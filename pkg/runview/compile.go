@@ -32,7 +32,7 @@ func computeWorkflowHash(src []byte, b *bundle.Bundle, _ *ast.File) string {
 	if b != nil {
 		// Bundle resources whose content changes what the agent reads — a
 		// prompt body or a preset's bias/vars — must invalidate the resume
-		// hash, same as the .iter source. Each is a directory of *.md files.
+		// hash, same as the .bot source. Each is a directory of *.md files.
 		hashBundleResourceDir(h, b.PromptsDir, "\x00bundle.prompt:")
 		hashBundleResourceDir(h, b.PresetsDir, "\x00bundle.preset:")
 	}
@@ -199,7 +199,7 @@ func compileWith(path, inline string, withHash bool, b *bundle.Bundle) (*ir.Work
 
 	// Compute the workflow hash AFTER the bundle merge so bundle prompt
 	// changes invalidate `iterion resume`'s change-detection. Hashing
-	// just the .iter source bytes (the previous behaviour) let a bundle
+	// just the .bot source bytes (the previous behaviour) let a bundle
 	// upgrade swap the prompt body without bumping the hash, defeating
 	// the whole point of the gate.
 	hash := ""

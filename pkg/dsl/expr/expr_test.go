@@ -273,7 +273,7 @@ func TestExpr_ParseErrors(t *testing.T) {
 // TestExpr_DepthLimit guards against unbounded recursion in the
 // expression parser. Deeply-nested parens, unary `!`, and unary `-`
 // must all return an error rather than blowing the goroutine stack.
-// Relevant under multitenant cloud where .iter content may be
+// Relevant under multitenant cloud where .bot content may be
 // supplied by an untrusted tenant.
 func TestExpr_DepthLimit(t *testing.T) {
 	const n = 10_000
@@ -327,7 +327,7 @@ func TestExpr_FuncCall_Length(t *testing.T) {
 
 	// Concrete-typed slices (e.g. []string from a runtime stub or
 	// backend output) should also count — without reflection support
-	// in builtinLength, an `.iter` edge condition like
+	// in builtinLength, an `.bot` edge condition like
 	// `length(blockers) > 0` would silently no-op when blockers came
 	// in as []string instead of the canonical []interface{}.
 	concreteCtx := makeCtx(

@@ -45,7 +45,7 @@ workflow w:
 `
 
 func TestCursorsRoundtrip(t *testing.T) {
-	pr1 := parser.Parse("t.iter", cursorsRoundtripSrc)
+	pr1 := parser.Parse("t.bot", cursorsRoundtripSrc)
 	if len(pr1.Diagnostics) > 0 {
 		for _, d := range pr1.Diagnostics {
 			t.Logf("first parse diag: %+v", d)
@@ -54,7 +54,7 @@ func TestCursorsRoundtrip(t *testing.T) {
 	}
 	out1 := Unparse(pr1.File)
 
-	pr2 := parser.Parse("t.iter", out1)
+	pr2 := parser.Parse("t.bot", out1)
 	if len(pr2.Diagnostics) > 0 {
 		for _, d := range pr2.Diagnostics {
 			t.Logf("second parse diag: %+v", d)

@@ -6,7 +6,7 @@ import "github.com/SocialGouv/iterion/pkg/dsl/types"
 // File — root of the AST
 // ---------------------------------------------------------------------------
 
-// File is the root AST node representing an entire .iter source file.
+// File is the root AST node representing an entire .bot source file.
 type File struct {
 	Vars        *VarsBlock        // top-level vars (optional, at most one)
 	Presets     *PresetsBlock     // top-level named preset value sets (optional, at most one)

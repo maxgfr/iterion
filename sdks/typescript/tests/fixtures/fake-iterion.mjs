@@ -87,7 +87,7 @@ function pickOutputs(scenario, argv) {
       return {
         stdout:
           JSON.stringify({
-            file: argv[argv.indexOf("validate") + 1] ?? "demo.iter",
+            file: argv[argv.indexOf("validate") + 1] ?? "demo.bot",
             valid: true,
             workflow_name: "demo",
             node_count: 3,
@@ -103,11 +103,11 @@ function pickOutputs(scenario, argv) {
       return {
         stdout:
           JSON.stringify({
-            file: argv[argv.indexOf("validate") + 1] ?? "bad.iter",
+            file: argv[argv.indexOf("validate") + 1] ?? "bad.bot",
             valid: false,
             parse_diagnostics: [
-              "bad.iter:1:14: error [E002]: expected :, got Newline",
-              "bad.iter:2:1: error [E002]: expected INDENT, got EOF",
+              "bad.bot:1:14: error [E002]: expected :, got Newline",
+              "bad.bot:2:1: error [E002]: expected INDENT, got EOF",
             ],
           }) +
           "\n" +
@@ -120,7 +120,7 @@ function pickOutputs(scenario, argv) {
       return {
         stdout:
           JSON.stringify({
-            error: `cannot read file: ${argv[argv.indexOf("validate") + 1] ?? "missing.iter"}`,
+            error: `cannot read file: ${argv[argv.indexOf("validate") + 1] ?? "missing.bot"}`,
           }) + "\n",
         stderr: "",
         exit: 1,
@@ -192,13 +192,13 @@ function pickOutputs(scenario, argv) {
         exit: 1,
       };
     case "run-error-envelope":
-      // Pre-engine failure (parse error in .iter, missing file, etc.):
+      // Pre-engine failure (parse error in .bot, missing file, etc.):
       // the CLI bails out before assigning a status and the global error
       // handler in cmd/iterion/main.go writes only the bare error envelope.
       return {
         stdout:
           JSON.stringify({
-            error: "parse error: /tmp/bad.iter:2:3: error [E012]: unknown agent property 'prompt'",
+            error: "parse error: /tmp/bad.bot:2:3: error [E012]: unknown agent property 'prompt'",
           }) + "\n",
         stderr: "",
         exit: 1,

@@ -126,7 +126,7 @@ func BudgetRecipe() Recipe {
 	return RecipeFunc(func(_ context.Context, _ *runtime.RuntimeError, _ int) Action {
 		return Action{
 			Kind:   ActionPauseForHuman,
-			Reason: "budget exhausted; extend the budget via .iter file or terminate the run",
+			Reason: "budget exhausted; extend the budget via .bot file or terminate the run",
 		}
 	})
 }

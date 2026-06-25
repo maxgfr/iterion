@@ -419,8 +419,8 @@ func TestSpansOmitted(t *testing.T) {
 			{
 				Name: "with_span",
 				Span: ast.Span{
-					Start: ast.Pos{File: "test.iter", Line: 1, Column: 1},
-					End:   ast.Pos{File: "test.iter", Line: 5, Column: 1},
+					Start: ast.Pos{File: "test.bot", Line: 1, Column: 1},
+					End:   ast.Pos{File: "test.bot", Line: 5, Column: 1},
 				},
 			},
 		},

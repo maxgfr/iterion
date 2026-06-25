@@ -268,7 +268,7 @@ export interface Diagnostic {
 
 /** Result of `iterion diagram --json`. */
 export interface DiagramResult {
-  /** Source .iter file. */
+  /** Source .bot file. */
   file?: string;
   /** Compiled workflow name. */
   workflow_name?: string;

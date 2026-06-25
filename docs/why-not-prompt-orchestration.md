@@ -10,7 +10,7 @@ The short answer: **yes for creative flexibility, no for the operational guarant
 
 Prompt-orchestration — a tool-using agent (Claude Code, Cursor, plain ChatGPT with code-interpreter…) deciding at runtime *what to do next* and dispatching sub-agents — is fast to author and wonderfully flexible. It is the right tool when the topology of your work changes every run and you'll only run it once or twice.
 
-Iterion picks the other side of the tradeoff. The `.iter` source compiles to a deterministic IR before anything executes. That IR is what unlocks the things you cannot get from a prompt: checkpoint and resume after a 3 a.m. crash, hard cost/token/duration budgets enforced by the runtime, replayable event logs, single-writer workspace safety across parallel branches, bounded loops, schema-checked I/O between nodes, and a long-running dispatcher that turns a tracker into a queue of workflow runs.
+Iterion picks the other side of the tradeoff. The `.bot` source compiles to a deterministic IR before anything executes. That IR is what unlocks the things you cannot get from a prompt: checkpoint and resume after a 3 a.m. crash, hard cost/token/duration budgets enforced by the runtime, replayable event logs, single-writer workspace safety across parallel branches, bounded loops, schema-checked I/O between nodes, and a long-running dispatcher that turns a tracker into a queue of workflow runs.
 
 Those guarantees aren't a *nice-to-have*. They're the difference between a workflow you can hand to a teammate or leave running over the weekend, and a one-shot experiment that you have to babysit.
 
@@ -18,9 +18,9 @@ Those guarantees aren't a *nice-to-have*. They're the difference between a workf
 
 Be honest about it — there are real cases where Iterion is over-engineered:
 
-- **One-shot exploration.** "Find out why this test flakes." A `.iter` file would be ceremony. A Claude Code session is the right shape.
+- **One-shot exploration.** "Find out why this test flakes." A `.bot` file would be ceremony. A Claude Code session is the right shape.
 - **Topology that genuinely changes every run.** If the next step truly depends on what was just discovered — not "branch on a boolean" but "decide between 15 possible directions" — pushing that decision into a router is artificial. A reasoning model orchestrating its own next move is the cleaner abstraction.
-- **Zero setup.** No binary to install, no DSL to learn, no `.iter` file to version.
+- **Zero setup.** No binary to install, no DSL to learn, no `.bot` file to version.
 - **Fastest authoring.** A good prompt + a model with subagent dispatch is, for prototype-grade work, faster than designing nodes and edges.
 
 If your work matches all three of *one-shot*, *unpredictable topology*, and *throwaway*, prompt-orchestration is almost certainly the right tool. Skip the rest of this page.
@@ -31,7 +31,7 @@ The moment you want any of the properties below, prompt-orchestration starts hit
 
 ### 1. Deterministic DAG
 
-The same `.iter` file produces the same graph of nodes and edges every time. The compiler ([pkg/dsl/ir/compile.go](../pkg/dsl/ir/compile.go)) takes the AST to an IR; the validator ([pkg/dsl/ir/validate.go](../pkg/dsl/ir/validate.go)) emits diagnostic codes C001–C086 for structural problems *before* you spend a token.
+The same `.bot` file produces the same graph of nodes and edges every time. The compiler ([pkg/dsl/ir/compile.go](../pkg/dsl/ir/compile.go)) takes the AST to an IR; the validator ([pkg/dsl/ir/validate.go](../pkg/dsl/ir/validate.go)) emits diagnostic codes C001–C086 for structural problems *before* you spend a token.
 
 With a prompt orchestrator, the topology is re-decided on every run. That's a feature for exploration and a bug for reproducibility — you can't diff "what changed between run 7 and run 8" if both runs invented their own plan.
 
@@ -83,7 +83,7 @@ A prompt orchestrator running on your laptop has the full filesystem and the ful
 
 ### 10. Backend portability
 
-The same `.iter` runs on `claude_code`, `codex`, or the in-process `claw` backend (which itself talks Anthropic, OpenAI, Bedrock, Vertex…). Swapping a model family is a one-line edit. See [backends.md](backends.md) and [delegation.md](delegation.md).
+The same `.bot` runs on `claude_code`, `codex`, or the in-process `claw` backend (which itself talks Anthropic, OpenAI, Bedrock, Vertex…). Swapping a model family is a one-line edit. See [backends.md](backends.md) and [delegation.md](delegation.md).
 
 A prompt-orchestrator is shaped to one host agent's idioms. Porting it to another is a rewrite.
 
@@ -97,7 +97,7 @@ A prompt-orchestrator is shaped to one host agent's idioms. Porting it to anothe
 2. Does it need to finish unattended — overnight, over a weekend, in CI?
 3. If it fails at 3 a.m., do I need to know *why*, and pick up where it stopped?
 
-Any **yes** → write a `.iter`. All **no** → a Claude Code session with sub-agent dispatch is probably faster.
+Any **yes** → write a `.bot`. All **no** → a Claude Code session with sub-agent dispatch is probably faster.
 
 ## The hybrid path
 

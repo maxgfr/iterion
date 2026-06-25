@@ -748,11 +748,11 @@ func TestValidateReferenceFixturesClean(t *testing.T) {
 	// Re-run fixture compilation and ensure no new validation errors.
 	// This uses the same fixtures as TestCompileReferenceFixture.
 	fixtures := []string{
-		"pr_refine_single_model.iter",
-		"pr_refine_dual_model_parallel.iter",
-		"pr_refine_dual_model_parallel_compliance.iter",
-		"recipe_benchmark.iter",
-		"ci_fix_until_green.iter",
+		"pr_refine_single_model.bot",
+		"pr_refine_dual_model_parallel.bot",
+		"pr_refine_dual_model_parallel_compliance.bot",
+		"recipe_benchmark.bot",
+		"ci_fix_until_green.bot",
 	}
 
 	newCodes := []DiagCode{

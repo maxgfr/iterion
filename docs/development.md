@@ -51,7 +51,7 @@ iterion/
 │   │   ├── parser/         # Lexer, recursive-descent parser, diagnostics
 │   │   ├── ast/            # AST definitions and JSON marshaling
 │   │   ├── ir/             # IR compilation and validation (~60 diagnostic codes, C001–C086 sparse — incl. cursors C083–C086)
-│   │   ├── unparse/        # IR → .iter serialization
+│   │   ├── unparse/        # IR → .bot serialization
 │   │   ├── expr/           # Expression evaluator for compute nodes and quoted `when` clauses
 │   │   ├── workflowfile/   # Workflow source loading + SHA-256 hashing (drives `iterion resume` change detection)
 │   │   └── types/          # Shared enums (transports, session/router modes…)
@@ -85,7 +85,7 @@ iterion/
 │   ├── log/             # Leveled logger
 │   └── internal/        # Internal utilities (appinfo, mongoutil for cloud-mode Mongo store, proc helpers)
 ├── studio/              # Web UI (React/Vite/TypeScript + XYFlow)
-├── examples/            # Reference .iter workflows + companion docs
+├── examples/            # Reference .bot workflows + companion docs
 ├── sdks/typescript/     # @iterion/sdk — typed CLI wrapper for Node/Deno/Bun
 ├── e2e/                 # End-to-end test suite (stub + live)
 ├── charts/iterion/      # Helm chart (server + runner Deployments, KEDA scaling, sandbox RBAC) — published to oci://ghcr.io/socialgouv/charts/iterion

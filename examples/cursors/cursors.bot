@@ -1,7 +1,7 @@
 ## Reference catalogue of prompt-engineering cursors.
 ##
 ## This file is a copy-paste-ready snippet, not a runnable workflow.
-## Drop the `cursor ...:` blocks you want into your own .iter / .bot
+## Drop the `cursor ...:` blocks you want into your own .bot
 ## source, then activate them per node with `cursors: { ambition: ... }`.
 ##
 ## Important: cursors are framing dials, NOT gates. See docs/cursors.md

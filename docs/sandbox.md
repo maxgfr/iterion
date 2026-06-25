@@ -211,7 +211,7 @@ Blocked requests surface to the run as a `network_blocked` event in
 
 ## Configuration surface
 
-### `.iter` workflow
+### `.bot` workflow
 
 The DSL accepts both short-form modes and block-form inline specs:
 

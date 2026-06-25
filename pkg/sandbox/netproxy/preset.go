@@ -4,7 +4,7 @@ package netproxy
 // authors don't have to repeat the LLM-endpoints + package-registries
 // + code-hosts boilerplate in every sandbox: block.
 //
-// Apply a preset by setting `network.preset:` in the .iter file (or
+// Apply a preset by setting `network.preset:` in the .bot file (or
 // by passing PresetIterionDefault as a Compile() prefix).
 //
 // The list is intentionally curated rather than exhaustive — adding a

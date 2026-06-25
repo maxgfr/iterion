@@ -104,7 +104,7 @@ export interface RunOptions extends BaseCallOptions {
 export interface ResumeOptions extends BaseCallOptions {
   /** Run to resume. Required. */
   runId: string;
-  /** Workflow file (.iter). Required (the CLI requires `--file`). */
+  /** Workflow file (.bot). Required (the CLI requires `--file`). */
   file: string;
   /** `--store-dir`. */
   storeDir?: string;

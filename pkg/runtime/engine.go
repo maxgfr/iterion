@@ -93,8 +93,8 @@ type Engine struct {
 	onNodeFinished           func(runID, nodeID string, output map[string]interface{})
 	onEvent                  func(evt store.Event) // optional observer fired after every successful append
 	recoveryDispatch         RecoveryDispatch      // optional; consulted on node execution failure
-	workflowHash             string                // SHA-256 of the .iter source, set via WithWorkflowHash
-	filePath                 string                // absolute .iter source path, set via WithFilePath
+	workflowHash             string                // SHA-256 of the .bot source, set via WithWorkflowHash
+	filePath                 string                // absolute .bot source path, set via WithFilePath
 	preset                   string                // in-source preset name selected at launch, set via WithPreset
 	runName                  string                // deterministic human-friendly run label, set via WithRunName
 	source                   *store.RunSource      // originating action metadata (dispatcher → issue ref), set via WithSource
@@ -113,7 +113,7 @@ type Engine struct {
 	sandboxHostStateOverride string                // CLI/Launch-level override for sandbox.host_state ("auto"|"none"|""); set via WithSandboxHostStateOverride
 	sandboxHostStateDefault  string                // global ITERION_SANDBOX_HOST_STATE snapshot; set via WithSandboxHostStateDefault
 	attachmentPromote        AttachmentPromoteFunc // optional: invoked after CreateRun to materialise attachments
-	bundle                   *bundle.Bundle        // optional: bundle backing this run; nil for plain .iter/.bot runs
+	bundle                   *bundle.Bundle        // optional: bundle backing this run; nil for plain .bot runs
 	pauseSignal              <-chan struct{}       // optional: closed by Service.Pause to request a soft pause at the next safe boundary; nil disables operator pause
 	dailyCap                 *DailyCapGuard        // optional: per-(store, UTC-day) spend cap; nil disables it. Set via WithDailyCap
 	callbackURL              string                // optional: run-completion webhook target persisted on the run; set via WithCallback
@@ -224,13 +224,13 @@ func WithRecoveryDispatch(d RecoveryDispatch) EngineOption {
 	return func(e *Engine) { e.recoveryDispatch = d }
 }
 
-// WithWorkflowHash sets a hash of the .iter source so that Resume can
+// WithWorkflowHash sets a hash of the .bot source so that Resume can
 // detect if the workflow changed since the run was started.
 func WithWorkflowHash(hash string) EngineOption {
 	return func(e *Engine) { e.workflowHash = hash }
 }
 
-// WithFilePath records the absolute .iter source path on the run
+// WithFilePath records the absolute .bot source path on the run
 // metadata so that resume (and the run console) can re-locate the
 // workflow without the caller having to thread it back through the
 // API. Optional — empty string is ignored.
@@ -341,7 +341,7 @@ func WithWorkDir(dir string) EngineOption {
 // WithBundle attaches a resolved `.botz` bundle to the engine. The
 // runtime mirrors the bundle's `skills/` directory into the workDir's
 // `.claude/skills/` so claude_code and the claw skill registry pick
-// them up transparently. Pass nil (the default) for plain .iter/.bot
+// them up transparently. Pass nil (the default) for plain .bot
 // runs without a backing bundle.
 func WithBundle(b *bundle.Bundle) EngineOption {
 	return func(e *Engine) { e.bundle = b }
@@ -1952,7 +1952,7 @@ func drillPath(root interface{}, path []string) interface{} {
 // typed defaults (e.g. "input.count >= vars.loop_count" tries to
 // compare a number against a string and aborts the run with an
 // opaque "cannot compare X >= string" error). Defaults from the
-// .iter source are already typed by the IR compiler — we coerce
+// .bot source are already typed by the IR compiler — we coerce
 // only on overrides.
 func (e *Engine) resolveVars(inputs map[string]interface{}) map[string]interface{} {
 	vars := make(map[string]interface{})

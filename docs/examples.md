@@ -6,14 +6,10 @@ The [`examples/`](../examples/) directory ships a curated set of
 proven, productized bots and one actively-developed workflow.
 
 > **Extensions.** Iterion runs workflows from `.bot` files; packaged
-> bundles use `.botz`. The former `.iter` extension is no longer
-> accepted at the CLI, server, dispatcher, or studio boundaries —
-> `iterion run foo.iter` is rejected ("unsupported workflow extension
-> … expected .bot or .botz"). `.iter` survives only as the raw /
-> work-in-progress form of the same DSL: the parser still reads it (it
-> lives under `pkg/dsl/testdata/`, `examples/`, and ad-hoc scripts),
-> but `.bot` is the only runnable source
-> ([`pkg/dsl/workflowfile`](../pkg/dsl/workflowfile/workflowfile.go)).
+> bundles use `.botz`. Any other extension is rejected at the CLI,
+> server, dispatcher, and studio boundaries
+> ([`pkg/dsl/workflowfile`](../pkg/dsl/workflowfile/workflowfile.go) is
+> the single source of truth).
 
 ## 🤖 Productized bots (folder-per-bot under [`examples/`](../examples/))
 
@@ -48,10 +44,3 @@ Small, self-contained `.bot` files that each isolate one feature:
 | Persona | Bot | Description |
 |---|---|---|
 | ⬆️ Renovacy | [`secured-renovacy/`](../bots/secured-renovacy/) (`.botz` bundle) | Autonomous, security-aware dependency upgrades for any stack (yarn/npm/pnpm/pip/poetry/uv/cargo/go/bundler/composer/maven). Run via `iterion run bots/secured-renovacy/` or against the packed archive `iterion bundle pack bots/secured-renovacy && iterion run bots/secured-renovacy.botz`. |
-
-## 📦 Archived
-
-Older `.iter` workflows that were useful at one time but are no longer
-maintained have moved to [`.archive/examples/`](../.archive/examples/).
-They are not embedded in the binary and are kept only for historical
-reference and as fixtures for the test suite.

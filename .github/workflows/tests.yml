@@ -301,7 +301,7 @@ jobs:
         # avoids any LLM dependency so the test stays hermetic. Auth is
         # disabled at install time (config.disableAuth=true) so we don't
         # need to bootstrap a user + JWT just to launch a smoke run.
-        # DSL shape (see docs/grammar/iter.ebnf + examples/*.iter):
+        # DSL shape (see docs/grammar/iterion_v1.ebnf + examples/*.bot):
         #   - top-level node decls, schemas, then `workflow` block
         #   - tool nodes use `output: <schema>` (singular) referencing a
         #     declared schema, not an inline `outputs:` map

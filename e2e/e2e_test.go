@@ -1,5 +1,5 @@
 // Package e2e runs end-to-end scenarios that exercise the full pipeline:
-// parse .iter file → compile to IR → execute on runtime engine → verify
+// parse .bot file → compile to IR → execute on runtime engine → verify
 // events, artifacts, verdicts, loops and metrics.
 //
 // Covered flagship workflows:
@@ -29,9 +29,9 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
-// compileFixture parses and compiles a workflow file (.iter / .bot)
+// compileFixture parses and compiles a workflow file (.bot)
 // from bots/ (the productised team), examples/ (demos), or
-// .archive/examples/ (historical fixtures used only by the test suite).
+// e2e/testdata/ (historical fixtures used only by the test suite).
 func compileFixture(t *testing.T, name string) *ir.Workflow {
 	t.Helper()
 	path := resolveFixturePath(t, name)
@@ -63,17 +63,17 @@ func compileFixture(t *testing.T, name string) *ir.Workflow {
 
 // resolveFixturePath looks up a fixture under the productised team root
 // bots/ first, then examples/ (demos), then falls back to
-// .archive/examples/ (where historical fixtures used only by the test
+// e2e/testdata/ (where historical fixtures used only by the test
 // suite live).
 func resolveFixturePath(t *testing.T, name string) string {
 	t.Helper()
-	for _, base := range []string{"../bots", "../examples", "../.archive/examples"} {
+	for _, base := range []string{"../bots", "../examples", "testdata"} {
 		path := filepath.Join(base, name)
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
 	}
-	t.Fatalf("fixture not found in bots/, examples/ or .archive/examples/: %s", name)
+	t.Fatalf("fixture not found in bots/, examples/ or e2e/testdata/: %s", name)
 	return ""
 }
 
@@ -193,7 +193,7 @@ func eventNodeIDs(events []*store.Event, t store.EventType) []string {
 //
 //	→ act_on_plan → final_verify(approved) → done
 func TestSingleModel_HappyPath(t *testing.T) {
-	wf := compileFixture(t, "pr_refine_single_model.iter")
+	wf := compileFixture(t, "pr_refine_single_model.bot")
 	exec := newScenarioExecutor()
 
 	// Wire up stubs that produce the expected outputs.
@@ -317,7 +317,7 @@ func TestSingleModel_HappyPath(t *testing.T) {
 // TestSingleModel_RefineLoop — compliance_check fails, enters refine loop,
 // then compliance_check_after_refine approves.
 func TestSingleModel_RefineLoop(t *testing.T) {
-	wf := compileFixture(t, "pr_refine_single_model.iter")
+	wf := compileFixture(t, "pr_refine_single_model.bot")
 	exec := newScenarioExecutor()
 
 	refineCount := 0
@@ -424,7 +424,7 @@ func TestSingleModel_RefineLoop(t *testing.T) {
 // TestSingleModel_GlobalReloop — final_verify rejects, causing a global
 // reloop back to context_builder.
 func TestSingleModel_GlobalReloop(t *testing.T) {
-	wf := compileFixture(t, "pr_refine_single_model.iter")
+	wf := compileFixture(t, "pr_refine_single_model.bot")
 	exec := newScenarioExecutor()
 
 	contextBuilderCalls := 0
@@ -524,7 +524,7 @@ func TestSingleModel_GlobalReloop(t *testing.T) {
 // TestDualParallel_HappyPath — both models review in parallel, plans are
 // synthesized, merged, act, final reviews approve.
 func TestDualParallel_HappyPath(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "pr_refine_dual_model_parallel.iter")
+	wf := compileFixtureStubSafe(t, "pr_refine_dual_model_parallel.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("context_builder", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -673,7 +673,7 @@ func TestDualParallel_HappyPath(t *testing.T) {
 // TestDualParallel_GlobalReloop — final compliance check rejects,
 // then approves on second full pass.
 func TestDualParallel_GlobalReloop(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "pr_refine_dual_model_parallel.iter")
+	wf := compileFixtureStubSafe(t, "pr_refine_dual_model_parallel.bot")
 	exec := newScenarioExecutor()
 
 	contextCalls := 0
@@ -773,7 +773,7 @@ func TestDualParallel_GlobalReloop(t *testing.T) {
 // TestCompliance_HappyPath_NoHumanGate — compliance passes, technical
 // decision gate says no human needed → straight to act.
 func TestCompliance_HappyPath_NoHumanGate(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "pr_refine_dual_model_parallel_compliance.iter")
+	wf := compileFixtureStubSafe(t, "pr_refine_dual_model_parallel_compliance.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("context_builder", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -874,7 +874,7 @@ func TestCompliance_HappyPath_NoHumanGate(t *testing.T) {
 // TestCompliance_HumanGate — technical decision gate needs human,
 // run pauses, resume continues to completion.
 func TestCompliance_HumanGate(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "pr_refine_dual_model_parallel_compliance.iter")
+	wf := compileFixtureStubSafe(t, "pr_refine_dual_model_parallel_compliance.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("context_builder", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -1046,7 +1046,7 @@ func TestCompliance_HumanGate(t *testing.T) {
 // TestCompliance_RefineLoop — initial compliance fails, enters the
 // alternating Claude/GPT refine loop.
 func TestCompliance_RefineLoop(t *testing.T) {
-	wf := compileFixtureStubSafe(t, "pr_refine_dual_model_parallel_compliance.iter")
+	wf := compileFixtureStubSafe(t, "pr_refine_dual_model_parallel_compliance.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("context_builder", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -1171,7 +1171,7 @@ func TestCompliance_RefineLoop(t *testing.T) {
 
 // TestCIFix_HappyPath — CI passes on first try after fix.
 func TestCIFix_HappyPath(t *testing.T) {
-	wf := compileFixture(t, "ci_fix_until_green.iter")
+	wf := compileFixture(t, "ci_fix_until_green.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("diagnose", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -1279,7 +1279,7 @@ func TestCIFix_HappyPath(t *testing.T) {
 // TestCIFix_FixLoop — CI fails first try, loops back to diagnose, then
 // succeeds on second attempt.
 func TestCIFix_FixLoop(t *testing.T) {
-	wf := compileFixture(t, "ci_fix_until_green.iter")
+	wf := compileFixture(t, "ci_fix_until_green.bot")
 	exec := newScenarioExecutor()
 
 	diagnoseCalls := 0
@@ -1376,7 +1376,7 @@ func TestCIFix_FixLoop(t *testing.T) {
 
 // TestCIFix_LoopExhaustion — CI never goes green, loop exhausts after 5 iterations.
 func TestCIFix_LoopExhaustion(t *testing.T) {
-	wf := compileFixture(t, "ci_fix_until_green.iter")
+	wf := compileFixture(t, "ci_fix_until_green.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("diagnose", func(_ map[string]interface{}) (map[string]interface{}, error) {
@@ -1444,22 +1444,22 @@ func TestCIFix_LoopExhaustion(t *testing.T) {
 
 func TestAllFixturesCompile(t *testing.T) {
 	fixtures := []string{
-		"pr_refine_single_model.iter",
-		"pr_refine_dual_model_parallel.iter",
-		"pr_refine_dual_model_parallel_compliance.iter",
-		"ci_fix_until_green.iter",
-		"pr_review.iter",
-		"pr_review_fix.iter",
-		"llm_router_task_dispatch.iter",
-		"session_fork.iter",
-		"recipe_benchmark.iter",
-		"feature_request_dual_model.iter",
-		"dual_model_plan_implement_review.iter",
-		"session_review_fix.iter",
-		"rust_to_go_port.iter",
-		"exhaustive_dsl_coverage.iter",
-		"dogfood_editor_ui_loop.iter",
-		"playwright_visual_qa.iter",
+		"pr_refine_single_model.bot",
+		"pr_refine_dual_model_parallel.bot",
+		"pr_refine_dual_model_parallel_compliance.bot",
+		"ci_fix_until_green.bot",
+		"pr_review.bot",
+		"pr_review_fix.bot",
+		"llm_router_task_dispatch.bot",
+		"session_fork.bot",
+		"recipe_benchmark.bot",
+		"feature_request_dual_model.bot",
+		"dual_model_plan_implement_review.bot",
+		"session_review_fix.bot",
+		"rust_to_go_port.bot",
+		"exhaustive_dsl_coverage.bot",
+		"dogfood_editor_ui_loop.bot",
+		"playwright_visual_qa.bot",
 	}
 
 	for _, name := range fixtures {
@@ -1515,7 +1515,7 @@ func TestAllFixturesCompile(t *testing.T) {
 
 func TestEventSequenceCoherence(t *testing.T) {
 	// Use the simplest workflow to validate event ordering rules.
-	wf := compileFixture(t, "ci_fix_until_green.iter")
+	wf := compileFixture(t, "ci_fix_until_green.bot")
 	exec := newScenarioExecutor()
 
 	exec.on("diagnose", func(_ map[string]interface{}) (map[string]interface{}, error) {

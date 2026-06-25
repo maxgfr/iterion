@@ -17,7 +17,7 @@ import (
 // Workflow-declared prompts already in f.Prompts keep precedence —
 // bundle files only fill in names the workflow author did not declare
 // in source. This lets a bundle ship reusable instructions without
-// bloating the .iter while still allowing the workflow to override
+// bloating the .bot while still allowing the workflow to override
 // any name locally.
 //
 // Operating at the AST level (rather than on the compiled IR) means

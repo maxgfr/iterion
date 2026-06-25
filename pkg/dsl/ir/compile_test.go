@@ -15,7 +15,7 @@ import (
 
 func parseFile(t *testing.T, src string) *ast.File {
 	t.Helper()
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	for _, d := range res.Diagnostics {
 		if d.Severity == parser.SeverityError {
 			t.Fatalf("parse error: %s", d.Error())
@@ -1359,16 +1359,16 @@ workflow test:
 
 func TestCompileReferenceFixture(t *testing.T) {
 	fixtures := []string{
-		"pr_refine_single_model.iter",
-		"pr_refine_dual_model_parallel.iter",
-		"pr_refine_dual_model_parallel_compliance.iter",
-		"recipe_benchmark.iter",
-		"ci_fix_until_green.iter",
+		"pr_refine_single_model.bot",
+		"pr_refine_dual_model_parallel.bot",
+		"pr_refine_dual_model_parallel_compliance.bot",
+		"recipe_benchmark.bot",
+		"ci_fix_until_green.bot",
 	}
 
 	for _, fixture := range fixtures {
 		t.Run(fixture, func(t *testing.T) {
-			path := filepath.Join("..", "..", "..", "examples", fixture)
+			path := filepath.Join("..", "testdata", fixture)
 			src, err := os.ReadFile(path)
 			if err != nil {
 				t.Skipf("fixture not found: %v", err)
@@ -1460,14 +1460,14 @@ workflow fork_test:
 // ---------------------------------------------------------------------------
 
 func TestCompileDeterminism(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "examples", "pr_refine_dual_model_parallel_compliance.iter")
+	path := filepath.Join("..", "testdata", "pr_refine_dual_model_parallel_compliance.bot")
 	src, err := os.ReadFile(path)
 	if err != nil {
 		t.Skipf("fixture not found: %v", err)
 	}
 
-	res1 := parser.Parse("test.iter", string(src))
-	res2 := parser.Parse("test.iter", string(src))
+	res1 := parser.Parse("test.bot", string(src))
+	res2 := parser.Parse("test.bot", string(src))
 
 	cr1 := Compile(res1.File)
 	cr2 := Compile(res2.File)
@@ -1514,13 +1514,13 @@ func TestCompileDeterminism(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCompileReferenceFixtureDetailed(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "examples", "pr_refine_dual_model_parallel_compliance.iter")
+	path := filepath.Join("..", "testdata", "pr_refine_dual_model_parallel_compliance.bot")
 	src, err := os.ReadFile(path)
 	if err != nil {
 		t.Skipf("fixture not found: %v", err)
 	}
 
-	res := parser.Parse("test.iter", string(src))
+	res := parser.Parse("test.bot", string(src))
 	cr := Compile(res.File)
 
 	if cr.HasErrors() {

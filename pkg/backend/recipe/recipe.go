@@ -27,7 +27,7 @@ type RecipeSpec struct {
 // WorkflowRef identifies the workflow to execute.
 type WorkflowRef struct {
 	Name string `json:"name"`           // workflow name (must match ir.Workflow.Name)
-	Path string `json:"path,omitempty"` // optional path to .iter file
+	Path string `json:"path,omitempty"` // optional path to .bot file
 }
 
 // PresetVars is a map of variable name → preset value. These override

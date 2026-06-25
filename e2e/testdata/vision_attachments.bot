@@ -12,7 +12,7 @@
 ##      → recupere "upload_id"
 ##   2. curl -X POST http://localhost:4891/api/runs \
 ##         -H "Content-Type: application/json" \
-##         -d '{"file_path":"examples/vision_attachments.iter",
+##         -d '{"file_path":"examples/vision_attachments.bot",
 ##              "attachments":{"logo":"<upload_id>"}}'
 
 attachments:

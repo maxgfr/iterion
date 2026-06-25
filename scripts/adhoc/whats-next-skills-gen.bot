@@ -13,13 +13,13 @@
 ## events.jsonl will show exactly where.
 ##
 ## Run:
-##   devbox run -- iterion run scripts/adhoc/whats-next-skills-gen.iter
+##   devbox run -- iterion run scripts/adhoc/whats-next-skills-gen.bot
 ##
 ## Tail (in a second terminal):
 ##   tail -F .iterion/runs/<run-id>/events.jsonl | jq '.'
 ##
 ## After a green run, commit the produced skills/*.md files. This
-## .iter file stays in scripts/adhoc/ as the seed for a future
+## .bot file stays in scripts/adhoc/ as the seed for a future
 ## bots/whats-next/generate-skills.bot (formalised version, run
 ## any time we want to refresh / add a skill).
 ## ─────────────────────────────────────────────────────────────────

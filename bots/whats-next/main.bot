@@ -487,7 +487,7 @@ prompt propose_system:
     .git, .works, .archive, dist, build, out, target. Keep tool calls
     few and targeted; the summary, not re-exploration, is your basis.
   - Every `assignee` you set MUST be the display name of a real
-    `.bot` / `.iter` file the explorer surfaced. Verify with a
+    `.bot` / `.bot` file the explorer surfaced. Verify with a
     quick `bash ls -la <workspace>/<bot_path>` if uncertain.
     Hallucinated assignees are the single most expensive
     mistake here: the dispatcher either skips them or fails them
@@ -616,7 +616,7 @@ prompt revise_system:
   Constraints:
   - Read-only. Same bash allowlist as propose_system.
   - Every `assignee` you set MUST be the display name of a real
-    `.bot` / `.iter` file the explorer surfaced. Re-verify with
+    `.bot` / `.bot` file the explorer surfaced. Re-verify with
     `ls` / `glob` if you change an assignee.
   - Use `assignee=""` when no existing bot fits — never invent.
   - long_term items normally have `assignee=""` (themes, not

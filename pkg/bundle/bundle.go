@@ -11,8 +11,8 @@ package bundle
 type Kind int
 
 const (
-	// KindIter is a plain `.bot` source file.
-	KindIter Kind = iota
+	// KindBot is a plain `.bot` source file.
+	KindBot Kind = iota
 	// KindBundle is a `.botz` tar.gz archive.
 	KindBundle
 	// KindBundleDir is a directory whose root already contains a
@@ -23,8 +23,8 @@ const (
 
 func (k Kind) String() string {
 	switch k {
-	case KindIter:
-		return "iter"
+	case KindBot:
+		return "bot"
 	case KindBundle:
 		return "bundle"
 	case KindBundleDir:

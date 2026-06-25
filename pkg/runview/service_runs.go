@@ -13,7 +13,7 @@ import (
 // run list. Prefers the persisted manifest name; falls back to
 // basename(bundlePath) stripped of `.botz` so legacy runs (persisted
 // before BundleName existed) still surface a readable label. Returns
-// "" for plain .iter/.bot runs with no bundle at all.
+// "" for plain .bot runs with no bundle at all.
 func resolveBundleName(bundleName, bundlePath string) string {
 	if bundleName != "" {
 		return bundleName

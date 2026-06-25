@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart LR
-  SRC[".iter file"] --> PARSE["PARSE<br/>Lexer + Parser"]
+  SRC[".bot file"] --> PARSE["PARSE<br/>Lexer + Parser"]
   PARSE --> COMPILE["COMPILE<br/>AST→IR<br/>Resolve"]
   COMPILE --> VALIDATE["VALIDATE<br/>Static Checks"]
   PARSE --> AST["AST"]

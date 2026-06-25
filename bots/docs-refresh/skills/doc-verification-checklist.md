@@ -112,7 +112,8 @@ candidates with the highest stakes:
 2. **Drifted `file_ref` for paths in active code roots** — a
    missing `pkg/foo/bar.go` mentioned in `docs/architecture.md` is
    nearly always real drift (rename, refactor). For `examples/`
-   refs, check `.archive/examples/` before raising.
+   refs, check whether the workflow moved (e.g. into a bot bundle or
+   `e2e/testdata/`) before raising.
 3. **Unverifiable symbol_ref in prose-heavy docs** — usually a
    false positive. Spot-check 1-2 to confirm before bulk
    dismissing the category.

@@ -10,7 +10,7 @@ import (
 	"github.com/SocialGouv/iterion/pkg/store"
 )
 
-// compileSource compiles an inline .iter source for engine-level tests.
+// compileSource compiles an inline .bot source for engine-level tests.
 func compileSource(t *testing.T, name, src string) *ir.Workflow {
 	t.Helper()
 	pr := parser.Parse(name, src)
@@ -40,7 +40,7 @@ workflow w:
   entry: commit_changes
   commit_changes -> done
 `
-	wf := compileSource(t, "verified_action.iter", src)
+	wf := compileSource(t, "verified_action.bot", src)
 	exec := newScenarioExecutor()
 	// Simulate the real executor: the node escalated to self-repair and the
 	// postcondition then held.

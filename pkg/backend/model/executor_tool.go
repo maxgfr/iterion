@@ -325,7 +325,7 @@ func (e *ClawExecutor) shellRecipe(ctx context.Context, node *ir.ToolNode, input
 			// an upstream-LLM-controlled input of `$INJECT` would survive
 			// shellEscape as `'$INJECT'`, then become `''; rm -rf ~; ''` if the
 			// env had INJECT=`'; rm -rf ~; '`. By expanding before substitution,
-			// only the .iter author's own `$VAR` references in the static
+			// only the .bot author's own `$VAR` references in the static
 			// command template are expanded; substituted values stay quoted.
 			//
 			// Only the BRACED form `${NAME}` is treated as an env var reference.

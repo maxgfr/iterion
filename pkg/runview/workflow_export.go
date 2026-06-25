@@ -21,7 +21,7 @@ type WireWorkflow struct {
 	Entry string     `json:"entry"`
 	Nodes []WireNode `json:"nodes"`
 	Edges []WireEdge `json:"edges"`
-	// StaleHash signals that the .iter source on disk no longer matches
+	// StaleHash signals that the .bot source on disk no longer matches
 	// the hash captured at run launch. The frontend can warn the user
 	// that the IR they are viewing may diverge from what was executed.
 	StaleHash bool `json:"stale_hash,omitempty"`
@@ -63,12 +63,12 @@ type WireEdge struct {
 
 // wireWorkflowCache memoises projection results keyed by file path so
 // repeated /api/runs/{id}/workflow requests (multiple browser tabs,
-// snapshot replays) don't re-parse + re-compile + re-walk the .iter
+// snapshot replays) don't re-parse + re-compile + re-walk the .bot
 // source. The cached entry stores the hash used to compile it; on
 // each request we re-stat the file via CompileWorkflowWithHash's hash
 // computation and only return the cache entry when the hash matches.
 //
-// The cache is unbounded but small in practice (one entry per .iter
+// The cache is unbounded but small in practice (one entry per .bot
 // file in the workspace). Service holds it as a member rather than a
 // package var so multiple Service instances in tests don't share state.
 type wireWorkflowCache struct {
@@ -102,7 +102,7 @@ func (c *wireWorkflowCache) put(filePath, hash string, wf *WireWorkflow) {
 	c.byKey[filePath] = wireWorkflowCacheEntry{wf: wf, hash: hash}
 }
 
-// LoadWireWorkflow recompiles the .iter source for runID and projects
+// LoadWireWorkflow recompiles the .bot source for runID and projects
 // the resulting IR into WireWorkflow shape. Results are memoised by
 // (filePath, content hash) so repeated calls for the same revision
 // don't re-parse. The stale_hash flag is derived by comparing the
@@ -142,7 +142,7 @@ func BuildWireWorkflowFromStore(ctx context.Context, s store.RunStore, runID str
 // helper share the same shape. A nil cache disables memoisation.
 //
 // Two compile-source flavours:
-//   - r.FilePath set: a launched-from-`.iter` run. CompileWorkflowWithHash
+//   - r.FilePath set: a launched-from-`.bot` run. CompileWorkflowWithHash
 //     reads the file directly.
 //   - r.BundlePath set (FilePath empty): a launched-from-`.botz` run
 //     (e.g. `iterion run bots/secured-renovacy/` or any live test

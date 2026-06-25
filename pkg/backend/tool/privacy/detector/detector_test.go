@@ -267,7 +267,7 @@ func TestRules_NoFP_OnExamples(t *testing.T) {
 	// real-data leak in the corpus → fail loudly so the maintainer
 	// either scrubs the example or extends the negative corpus.
 	d := New()
-	matches, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "..", "examples", "*.iter"))
+	matches, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "..", "examples", "*.bot"))
 	if err != nil {
 		t.Fatalf("glob examples: %v", err)
 	}

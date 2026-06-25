@@ -204,13 +204,13 @@ func (s *Service) spawnDetached(parent context.Context, spec detachedSpec) (*Lau
 }
 
 // launchDetached is the Launch path that delegates to a spawned
-// runner subprocess. It validates the .iter file (so an obviously bad
+// runner subprocess. It validates the .bot file (so an obviously bad
 // workflow is rejected at the API boundary instead of silently
 // failing inside the spawned process), starts the runner, and wires
 // up the file-based event + log tailers so the studio's WS
 // subscribers see the runner's output.
 func (s *Service) launchDetached(parent context.Context, runID string, spec LaunchSpec) (*LaunchResult, error) {
-	// Up-front compile so a malformed .iter doesn't get past the API
+	// Up-front compile so a malformed .bot doesn't get past the API
 	// boundary. We discard the compiled IR — the runner subprocess
 	// will compile its own copy from the same source. This duplicate
 	// work is acceptable: it gives the caller a synchronous error for

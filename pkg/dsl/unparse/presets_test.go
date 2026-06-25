@@ -68,7 +68,7 @@ presets:
     debug: false
     retries: 5
 `
-	res := parser.Parse("test.iter", src)
+	res := parser.Parse("test.bot", src)
 	for _, d := range res.Diagnostics {
 		if d.Severity == parser.SeverityError {
 			t.Fatalf("initial parse error: %s", d.Error())
@@ -77,7 +77,7 @@ presets:
 	out := Unparse(res.File)
 
 	// Re-parse the unparsed output; should be diagnostic-free.
-	res2 := parser.Parse("test.iter.roundtrip", out)
+	res2 := parser.Parse("test.bot.roundtrip", out)
 	for _, d := range res2.Diagnostics {
 		if d.Severity == parser.SeverityError {
 			t.Fatalf("re-parse error: %s\nunparsed:\n%s", d.Error(), out)

@@ -51,29 +51,29 @@ reference self-host case.
   The `Bot`→`WorkflowPath` catch is textbook docs-refresh value:
   finding docs that name removed/renamed symbols.
 
-## 2026-06-14 — repo-wide .iter→.bot CLI-example drift (run 019ec7ba)
+## 2026-06-14 — repo-wide .bot→.bot CLI-example drift (run 019ec7ba)
 
 - **Status: validated** — fixed exactly the drift the ticket flagged; correct,
   complete, scoped, intentional mentions preserved.
 - **Versions:** bot v0.15.0 · iterion @ `8a00e93b` (main)
-- **Method:** board ticket `a3b57a17` ("docs-refresh missed repo-wide .iter→.bot
+- **Method:** board ticket `a3b57a17` ("docs-refresh missed repo-wide .bot→.bot
   CLI-example drift"). docs-refresh has **no `worktree: auto` and no sandbox** →
   ran on the **live tree** (host mode: `claude` 2.1.177 on PATH, forfait forced),
   scoped to the 5 drifted files via `doc_globs`, `bundle_self_path=bots/docs-refresh`,
   `store-dir=.iterion`. Committed directly to main.
 - **Result: converged + committed `211e69f7`** ("docs(cli): update CLI examples
   to use the .bot extension", **5 files, 23/23**). 3 reviewer cycles, **$8.40 /
-  127k tokens**. Independently verified mid-loop: **0 runnable `.iter` left** in
+  127k tokens**. Independently verified mid-loop: **0 runnable `.bot` left** in
   all 5 files, **zero over-reach** (nothing outside the 5 in-scope docs),
   `examples.md`/README/CLAUDE intentional "rejected/legacy" mentions untouched.
   `.docs-refresh-cache.json` is gitignored (no repo pollution). Board a3b57a17 → done.
 - **Value: correct + scoped.** The commit message even states "Prose references
-  to .iter as the DSL raw/source form are intentionally left unchanged" — the bot
+  to .bot as the DSL raw/source form are intentionally left unchanged" — the bot
   understood the preserve-intentional-mentions instruction.
 
 ### Findings / misses
 - **Doki's automated scanners do NOT auto-detect CLI-example extension-literal
-  drift.** `iterion run X.iter` in a code fence is not a dead link/anchor, so
+  drift.** `iterion run X.bot` in a code fence is not a dead link/anchor, so
   `md_link`/`build_manifest` don't flag it. Doki fixed it **only because
   scope_notes pointed the reviewers at it** — an *unguided* run would miss
   a3b57a17 again. The "miss" is a real scanner-coverage gap. Improvement idea:
@@ -99,7 +99,7 @@ reference self-host case.
 ## 2026-06-14 — first dogfood + md_link scanner improvement (runs 019ec675, 019ec69f)
 
 First recorded dogfood, on the real board ticket `c4043495` ("Align the
-.bot/.iter documentation boundary"). Run in an isolated git worktree
+.bot documentation boundary"). Run in an isolated git worktree
 (`--merge-into none`), store pointed at the operator's `.iterion` so the
 run was visible in studio. Bot launched via standalone `iterion run` (not
 the watchexec studio backend) and the install was a fresh static binary at
@@ -108,8 +108,8 @@ HEAD — both per the CLAUDE.md dogfood discipline.
 - Status: **validated (with one real coverage finding, since fixed)**.
 - Versions: bot 0.13.1 → **0.14.0** (this session) · iterion `e9148046`.
 - Method: claude_code `claude-opus-4-8` + claw `openai/gpt-5.5`; isolated
-  worktree; `--var doc_globs=CLAUDE.md,README.md,docs/**/*.md,pkg/cli/templates/*.bot,*.iter`
-  `--var scope_notes="resolve .bot/.iter tension"` `--var bundle_self_path=bots/docs-refresh`.
+  worktree; `--var doc_globs=CLAUDE.md,README.md,docs/**/*.md,pkg/cli/templates/*.bot,*.bot`
+  `--var scope_notes="resolve .bot tension"` `--var bundle_self_path=bots/docs-refresh`.
 - Result: **converged in 4 review iterations**, `$7.68`, ~126k tokens,
   ~27 min. Commit `e9520f11` on `dogfood/docs-refresh-boundary`.
   `.md`-only contract held; `prepare_commit` re-verified every code ref
@@ -124,9 +124,9 @@ HEAD — both per the CLAUDE.md dogfood discipline.
 
 ### Finding (bot coverage gap) → FIXED this session
 The bot **converged without resolving the ticket's headline item**:
-`CLAUDE.md:3` still claimed "`.iter` / `.bot` — identical semantics" and
+`CLAUDE.md:3` still claimed "`.bot` / `.bot` — identical semantics" and
 linked a **dead anchor** `README.md#iter-vs-bot` (the README heading was
-removed; the CLI now rejects `.iter` outright — `unsupported workflow
+removed; the CLI now rejects `.bot` outright — `unsupported workflow
 extension`). The reviewers verify doc→**code** refs (symbols, CLI surface,
 file paths under known roots) but nothing systematically audited
 doc→**doc** internal links / `#heading-anchors`. `FILE_RE` in

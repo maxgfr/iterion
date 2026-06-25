@@ -1,12 +1,13 @@
 # Normalize line endings to LF on checkout for all text files.
-# Without this, a Windows clone with autocrlf=true would rewrite .iter
+# Without this, a Windows clone with autocrlf=true would rewrite .bot
 # and shell scripts with CRLF, breaking parser indentation rules and
 # any `#!/bin/sh` shebang.
 * text=auto eol=lf
 
 # Source code — always LF.
 *.go        text eol=lf
-*.iter      text eol=lf
+*.bot       text eol=lf
+*.botz      text eol=lf
 *.md        text eol=lf
 *.yml       text eol=lf
 *.yaml      text eol=lf

@@ -1,6 +1,6 @@
 # Iterion DSL V1 — Formal Grammar
 
-This is the complete grammar specification for `.iter` files, updated to reflect all features supported by the parser.
+This is the complete grammar specification for `.bot` files, updated to reflect all features supported by the parser.
 
 Notation: `UPPER_CASE` = terminals/tokens, `lower_case` = non-terminals, `{ x }` = 0..N, `[ x ]` = optional, `( x | y )` = alternative, `"..."` = literal.
 

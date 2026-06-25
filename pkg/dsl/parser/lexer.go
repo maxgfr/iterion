@@ -6,7 +6,7 @@ import (
 	"unicode"
 )
 
-// Safety limits to prevent DoS from malicious .iter files.
+// Safety limits to prevent DoS from malicious .bot files.
 const (
 	maxSourceSize   = 10 * 1024 * 1024 // 10 MB max file size
 	maxNestingDepth = 100              // max indentation nesting levels

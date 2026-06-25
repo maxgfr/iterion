@@ -1,11 +1,11 @@
 # E2E Test Scenarios
 
 End-to-end suite validating that flagship workflows pass from start to finish
-through the full pipeline: parse `.iter` → compile IR → runtime engine → store.
+through the full pipeline: parse `.bot` → compile IR → runtime engine → store.
 
 ## Pipeline
 
-Each test loads an `.iter` file from `examples/`, compiles it to IR,
+Each test loads an `.bot` file from `examples/`, compiles it to IR,
 injects a `scenarioExecutor` (stub configurable per node) and executes via
 `runtime.Engine`. Assertions cover:
 

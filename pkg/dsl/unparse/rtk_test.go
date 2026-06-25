@@ -40,7 +40,7 @@ workflow minimal:
   gate -> ship
   ship -> done
 `
-	pr1 := parser.Parse("rtk.iter", src)
+	pr1 := parser.Parse("rtk.bot", src)
 	for _, d := range pr1.Diagnostics {
 		if d.Severity == parser.SeverityError {
 			t.Fatalf("original parse error: %s", d.Error())
@@ -54,7 +54,7 @@ workflow minimal:
 		}
 	}
 
-	pr2 := parser.Parse("rtk.iter.roundtrip", unparsed)
+	pr2 := parser.Parse("rtk.bot.roundtrip", unparsed)
 	for _, d := range pr2.Diagnostics {
 		if d.Severity == parser.SeverityError {
 			t.Fatalf("re-parse error: %s\nUnparsed:\n%s", d.Error(), unparsed)

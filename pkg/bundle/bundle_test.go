@@ -16,14 +16,14 @@ func TestDetect_BotFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("detect: %v", err)
 	}
-	if kind != KindIter {
-		t.Errorf("kind = %v, want KindIter", kind)
+	if kind != KindBot {
+		t.Errorf("kind = %v, want KindBot", kind)
 	}
 }
 
-func TestDetect_RejectsIterFile(t *testing.T) {
+func TestDetect_RejectsUnsupportedExtension(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "hello.iter")
+	path := filepath.Join(dir, "hello.txt")
 	if err := os.WriteFile(path, []byte("# stub"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestDetect_BundleDir(t *testing.T) {
 	}
 }
 
-func TestDetect_DirWithoutBotIter(t *testing.T) {
+func TestDetect_DirWithoutBot(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Detect(dir); err == nil {
 		t.Fatal("expected error for empty directory, got nil")

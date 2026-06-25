@@ -209,7 +209,7 @@ generally don't work. Each target must be built on a matching host:
 
 - `task desktop:build:linux:amd64` succeeds locally.
 - The produced `build/bin/iterion-desktop-linux-amd64` opens a window, loads the
-  editor, can run a `.iter` workflow end-to-end.
+  editor, can run a `.bot` workflow end-to-end.
 - The AppImage produced by `task desktop:package:linux:amd64` runs on a
   freshly-installed Debian or Ubuntu without devbox installed.
 - Drop a `v*` tag → `desktop-release.yml` job is green for all six matrix

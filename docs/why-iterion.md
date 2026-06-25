@@ -20,7 +20,7 @@ The same shape works for fixing existing code, and stretches to multi-hour auton
 
 ## What Iterion lets you do
 
-- **Compose pipelines** — chain agents, judges, routers, humans, tools, and compute nodes into one graph in a single `.iter` document (parallel branches converge via `await: wait_all` / `best_effort` on a downstream node — there is no separate join node).
+- **Compose pipelines** — chain agents, judges, routers, humans, tools, and compute nodes into one graph in a single `.bot` document (parallel branches converge via `await: wait_all` / `best_effort` on a downstream node — there is no separate join node).
 - **Make LLMs talk to each other** — multi-agent, multi-backend, multi-model, inside one workflow. Mixing families is a one-line change.
 - **Automate processes** — run on demand, on schedule, in CI, or unattended for hours, with budgets and per-run sandboxes. A 90-minute run that dies at minute 80 resumes from minute 75.
 - **Formalise the method that worked for you** — the recipe becomes a versioned, diffable, shareable file.
@@ -34,6 +34,6 @@ The asymptote is detected by the judge — its verdict prompt is the load-bearin
 
 ## Why a dedicated engine
 
-Shell scripts can chain commands but can't checkpoint long autonomous runs, sandbox each agent, or produce a replayable log. Python frameworks (LangGraph, CrewAI) fit many teams; Iterion picks differently — a small `.iter` document anyone can read, diff, and re-run without an interpreter. Two recipe variants run side-by-side without touching code.
+Shell scripts can chain commands but can't checkpoint long autonomous runs, sandbox each agent, or produce a replayable log. Python frameworks (LangGraph, CrewAI) fit many teams; Iterion picks differently — a small `.bot` document anyone can read, diff, and re-run without an interpreter. Two recipe variants run side-by-side without touching code.
 
 Get started: [install.md](install.md).

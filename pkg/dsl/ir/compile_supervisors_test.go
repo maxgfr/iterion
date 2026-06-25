@@ -27,7 +27,7 @@ workflow main:
 `
 
 func TestCompileSupervisorDeclaration(t *testing.T) {
-	pr := parser.Parse("t.iter", supervisorWF)
+	pr := parser.Parse("t.bot", supervisorWF)
 	if pr.File == nil {
 		t.Fatalf("parse returned nil: %v", pr.Diagnostics)
 	}
@@ -79,7 +79,7 @@ workflow main:
   entry: implement
   implement -> done
 `
-	pr := parser.Parse("t.iter", src)
+	pr := parser.Parse("t.bot", src)
 	res := Compile(pr.File)
 	var sawWarn bool
 	for _, d := range res.Diagnostics {
