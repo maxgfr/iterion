@@ -465,9 +465,17 @@ edit to a path, cost threshold); the bot returns a structured `Decision`
 (intervene/message/watch/done) via `GenerateObjectDirect`. Injection
 reuses `runview.Service.QueueMessage`, so steering shows in the studio
 conversation and is delivered by the same inbox-drain hooks as operator
-chat. Two surfaces: the in-`.bot` `supervisor <name>:` block (primary,
-auto-spawned; diagnostics C190–C193) and `iterion supervise --run-id
---node --system --monitor` (attach to an already-running run). Reference:
+chat. Three surfaces: the in-`.bot` `supervisor <name>:` block (primary,
+auto-spawned; diagnostics C190–C193), `iterion supervise --run-id --node
+--system --monitor` (attach to an already-running iterion run), and
+`iterion supervise --claude-session <cwd>` (attach to a **raw** `claude`
+CLI/VSCode session — iterion tails its
+`~/.claude/projects/<key>/<sessionId>.jsonl` transcript and steers via a
+`Stop`/`PostToolUse` hook, installed by `iterion supervise install-hook`,
+that runs the hidden `iterion __claude-hook-drain` to inject from an
+inbox under `~/.iterion/claude-sessions/<key>/`). The transcript tailer
+is an `Observer` and the inbox an `Injector`, so the same Coordinator/bot
+drive both managed and raw targets. Reference:
 [docs/supervisors.md](docs/supervisors.md),
 [examples/supervisor/sample.bot](examples/supervisor/sample.bot).
 

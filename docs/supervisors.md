@@ -102,6 +102,49 @@ The supervisor blocks until the run terminates or you Ctrl-C to detach.
 Because it observes via the shared store, it works against a run launched
 by any other process (a `iterion run`, the studio, the dispatcher).
 
+## Supervising a raw Claude Code session
+
+A supervisor can also watch a **raw `claude` CLI / VSCode session** that
+iterion did not launch — no `.bot`, no run. iterion observes the session
+by tailing its transcript and steers it through Claude Code's own hook
+mechanism (the same one the `claude_code` delegate uses internally).
+
+One-time setup per repo — install the drain hook into the target repo's
+Claude Code settings:
+
+```sh
+iterion supervise install-hook --cwd /path/to/repo   # writes .claude/settings.local.json
+```
+
+This adds a `Stop` + `PostToolUse` command hook that runs
+`iterion __claude-hook-drain`. It is non-destructive (existing hooks and
+keys are preserved) and idempotent; remove it with `uninstall-hook`. The
+hook must be present **before** the `claude` session starts (Claude Code
+reads hooks at session start).
+
+Then attach a supervisor to a running session:
+
+```sh
+iterion supervise --claude-session /path/to/repo \
+  --system @policies/watchdog.md \
+  --monitor event_type=tool_error,tool_name=Bash
+```
+
+iterion finds the active transcript
+(`~/.claude/projects/<key>/<sessionId>.jsonl`), tails it, and when the
+supervisor decides to intervene it writes to an iterion-owned inbox
+(`~/.iterion/claude-sessions/<key>/`); the installed hook drains it and
+injects the message at the session's next tool/stop boundary. Raw
+sessions have no nodes, so `--node` is ignored (always session-scoped).
+
+How it maps to the managed path: the same `Coordinator`/bot drive both —
+the transcript tailer is an `Observer` (it synthesizes `tool_called` /
+`tool_error` / turn-boundary events from transcript records), and the
+inbox is an `Injector`. Honest limits: injection lands at the next
+boundary (no mid-LLM-call interruption); the hook must be pre-installed;
+and concurrent sessions in one repo share the project inbox unless keyed
+by session id.
+
 ## Monitors
 
 A monitor is an event pattern; every set field must match (unset fields
@@ -127,8 +170,9 @@ main token-saver.
 
 ## Roadmap
 
-- **Raw Claude Code session bridge** — supervise a raw `claude` CLI/VSCode
-  session (no `.bot`) by tailing its transcript and injecting via a
-  `settings.json` Stop/PostToolUse hook that drains an iterion inbox.
 - **Inline `monitors:` in the DSL block** — today monitors are registered
   by the bot at runtime or pre-seeded via the CLI `--monitor` flag.
+- **Session-scoped raw inbox by default** — disambiguate concurrent
+  `claude` sessions in the same repo (currently project-keyed with a
+  session-id refinement).
+- **Cloud event-source mode** for `ObserveRun` (today local broker mode).
