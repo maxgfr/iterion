@@ -109,12 +109,16 @@ func buildResumeExecutor(
 		return opts.Executor, nil
 	}
 	exec, err := runview.BuildExecutor(runview.ExecutorSpec{
-		Workflow: wf,
-		Vars:     nil,
-		Store:    s,
-		RunID:    opts.RunID,
-		Logger:   logger,
-		StoreDir: storeDir,
+		Workflow:        wf,
+		Vars:            nil,
+		Store:           s,
+		RunID:           opts.RunID,
+		Logger:          logger,
+		StoreDir:        storeDir,
+		Permission:      opts.Permission,
+		PermissionAllow: opts.PermissionAllow,
+		PermissionAsk:   opts.PermissionAsk,
+		PermissionDeny:  opts.PermissionDeny,
 	})
 	if err != nil {
 		return nil, err

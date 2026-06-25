@@ -47,6 +47,14 @@ type ResumeOptions struct {
 	// budget + resume" recovery relies on this. Non-zero wins; zero
 	// inherits. See applyBudgetOverrides.
 	Budget BudgetOverrides
+	// Permission overrides the tool-permission gate on resume. Adding an
+	// allow rule here is how an operator authorizes a call the run paused
+	// on (`permission: ask`): the rule lands in the resolved policy, the
+	// agent re-issues the call, and it proceeds. See docs/permissions.md.
+	Permission      string
+	PermissionAllow []string
+	PermissionAsk   []string
+	PermissionDeny  []string
 }
 
 // RunResumeWithFile resumes a paused run using a workflow file and answers.
