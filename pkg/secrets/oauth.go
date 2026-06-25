@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,23 @@ func (k OAuthKind) Valid() bool {
 	}
 	return false
 }
+
+// OrgOwnerPrefix marks an OAuthRecord whose owner is a team/org rather
+// than an individual user. An org-scoped forfait is stored as an
+// ordinary OAuthRecord whose UserID is OrgOwnerKey(tenantID) — this
+// reuses the whole store/seal/refresh machinery (AAD, Mongo id,
+// ExpiringBefore) without a schema change. The cloud publisher uses
+// these as a FALLBACK when the run's owner has no personal record,
+// covering automated runs (webhook/dispatcher/cron) whose owner is a
+// synthetic identity. See OrgOwnerKey / IsOrgOwner.
+const OrgOwnerPrefix = "org:"
+
+// OrgOwnerKey returns the synthetic owner key under which a team/org's
+// shared forfait credential is stored.
+func OrgOwnerKey(tenantID string) string { return OrgOwnerPrefix + tenantID }
+
+// IsOrgOwner reports whether an owner key denotes a team/org record.
+func IsOrgOwner(ownerID string) bool { return strings.HasPrefix(ownerID, OrgOwnerPrefix) }
 
 // OAuthRecord is the per-(user, kind) sealed credential bundle.
 //

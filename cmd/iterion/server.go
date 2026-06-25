@@ -338,6 +338,7 @@ func runServer(cmd *cobra.Command, _ []string) error {
 		RunSecrets:             stores.runSecrets,
 		Sealer:                 sealer,
 		OAuthForfait:           stores.oauth,
+		OAuthPending:           stores.oauthPending,
 		AnthropicOAuthClientID: cfg.Auth.OAuthForfait.AnthropicClientID,
 		CodexOAuthClientID:     cfg.Auth.OAuthForfait.CodexClientID,
 		AccessTTL:              cfg.Auth.AccessTTL,
@@ -371,6 +372,7 @@ type cloudStores struct {
 	genericSecrets   *secrets.MongoGenericSecretStore
 	runSecrets       *secrets.MongoRunSecretsStore
 	oauth            *secrets.MongoOAuthStore
+	oauthPending     *secrets.MongoOAuthPendingStore
 	botBindings      *secrets.MongoBotSecretBindingStore
 	webhooks         *webhooks.MongoStores
 	forgeConn        *forge.MongoConnectionStore
@@ -399,6 +401,7 @@ func buildCloudStores(ctx context.Context, st *mongostore.Store) (*cloudStores, 
 		genericSecrets:   secrets.NewMongoGenericSecretStore(st.DB()),
 		runSecrets:       secrets.NewMongoRunSecretsStore(st.DB()),
 		oauth:            secrets.NewMongoOAuthStore(st.DB()),
+		oauthPending:     secrets.NewMongoOAuthPendingStore(st.DB()),
 		botBindings:      secrets.NewMongoBotSecretBindingStore(st.DB()),
 		webhooks:         webhooks.NewMongoStores(st.DB()),
 		forgeConn:        forge.NewMongoConnectionStore(st.DB()),
@@ -429,6 +432,7 @@ func buildCloudStores(ctx context.Context, st *mongostore.Store) (*cloudStores, 
 		{"generic_secrets", s.genericSecrets.EnsureSchema},
 		{"run_secrets", s.runSecrets.EnsureSchema},
 		{"oauth", s.oauth.EnsureSchema},
+		{"oauth_pending", s.oauthPending.EnsureSchema},
 		{"bot_secret_bindings", s.botBindings.EnsureSchema},
 		{"webhooks", func(c context.Context) error { return webhooks.EnsureSchema(c, st.DB()) }},
 		{"forge_connections", s.forgeConn.EnsureSchema},

@@ -265,24 +265,40 @@ func (p *Publisher) resolveAndSealCredentials(ctx context.Context, runID, tenant
 		}
 	}
 
-	// 3. OAuth-forfait blobs. Only embed the kinds the owner has
-	//    actively connected; the runner falls back to env when
-	//    neither an API key nor an OAuth bundle is present.
-	if p.oauthForfait != nil && ownerID != "" {
-		records, err := p.oauthForfait.ListByUser(ctx, ownerID)
-		if err != nil {
-			p.logger.Warn("cloudpublisher: oauth list for %s: %v", ownerID, err)
-		} else {
+	// 3. OAuth-forfait blobs. Resolution is user-primary with an org
+	//    fallback: the run owner's personal forfait wins per kind, and
+	//    for any kind the owner hasn't connected we fall back to the
+	//    team/org credential (stored under OrgOwnerKey(tenantID)). The
+	//    org fallback is what covers automated runs (webhook/dispatcher/
+	//    cron) whose owner is a synthetic identity with no personal
+	//    forfait. The runner falls back to env when neither an API key
+	//    nor an OAuth bundle is present.
+	if p.oauthForfait != nil {
+		addOAuth := func(ownerKey, label string) {
+			if ownerKey == "" {
+				return
+			}
+			records, err := p.oauthForfait.ListByUser(ctx, ownerKey)
+			if err != nil {
+				p.logger.Warn("cloudpublisher: oauth list for %s: %v", ownerKey, err)
+				return
+			}
 			for _, rec := range records {
+				// User record wins; don't let the org fallback overwrite it.
+				if _, exists := bundle.OAuthCredentials[string(rec.Kind)]; exists {
+					continue
+				}
 				payload, err := secrets.OpenOAuthPayload(p.sealer, rec.UserID, rec.Kind, rec.SealedPayload)
 				if err != nil {
 					p.logger.Warn("cloudpublisher: unseal oauth %s/%s: %v", rec.UserID, rec.Kind, err)
 					continue
 				}
 				bundle.OAuthCredentials[string(rec.Kind)] = payload
-				p.logger.Info("cloudpublisher: oauth-forfait used run=%s user=%s kind=%s", runID, ownerID, rec.Kind)
+				p.logger.Info("cloudpublisher: oauth-forfait(%s) used run=%s owner=%s kind=%s", label, runID, ownerKey, rec.Kind)
 			}
 		}
+		addOAuth(ownerID, "user")
+		addOAuth(secrets.OrgOwnerKey(tenantID), "org")
 	}
 
 	if len(bundle.APIKeys) == 0 && len(bundle.GenericSecrets) == 0 && len(bundle.OAuthCredentials) == 0 {

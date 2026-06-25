@@ -2,11 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/SocialGouv/iterion/pkg/auth"
@@ -14,9 +14,16 @@ import (
 )
 
 // registerOAuthForfaitRoutes wires the per-user OAuth subscription
-// management endpoints.
+// management endpoints. The team-scoped (org) mirror lives in
+// oauth_team_routes.go; both delegate to the *ForOwner helpers below so
+// the personal and org flows can never diverge.
 func (s *Server) registerOAuthForfaitRoutes() {
 	s.mux.Handle("GET /api/me/oauth/connections", s.requireAuth(http.HandlerFunc(s.handleListOAuthConnections)))
+	// Browser OAuth (authorization-code + PKCE), the cloud-viable way to
+	// connect without `claude login` or pasting a credentials.json file.
+	s.mux.Handle("POST /api/me/oauth/{kind}/authorize/start", s.requireAuth(http.HandlerFunc(s.handleStartOAuthAuthorize)))
+	s.mux.Handle("POST /api/me/oauth/{kind}/authorize/complete", s.requireAuth(http.HandlerFunc(s.handleCompleteOAuthAuthorize)))
+	// Raw blob paste — kept as a fallback (power users / Codex).
 	s.mux.Handle("POST /api/me/oauth/{kind}/credentials", s.requireAuth(http.HandlerFunc(s.handleUploadOAuthCredentials)))
 	s.mux.Handle("POST /api/me/oauth/{kind}/refresh", s.requireAuth(http.HandlerFunc(s.handleRefreshOAuth)))
 	s.mux.Handle("DELETE /api/me/oauth/{kind}", s.requireAuth(http.HandlerFunc(s.handleDeleteOAuth)))
@@ -44,9 +51,46 @@ func toOAuthView(r secrets.OAuthRecord) oauthConnectionView {
 	}
 }
 
+// ---- per-user (/me) HTTP handlers ----
+
 func (s *Server) handleListOAuthConnections(w http.ResponseWriter, r *http.Request) {
 	id, _ := auth.FromContext(r.Context())
-	records, err := s.oauthStore.ListByUser(r.Context(), id.UserID)
+	s.listOAuthForOwner(w, r, id.UserID)
+}
+
+func (s *Server) handleStartOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	s.startOAuthForOwner(w, r, id.UserID, secrets.OAuthKind(r.PathValue("kind")))
+}
+
+func (s *Server) handleCompleteOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	s.completeOAuthForOwner(w, r, id.UserID, secrets.OAuthKind(r.PathValue("kind")))
+}
+
+func (s *Server) handleUploadOAuthCredentials(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	s.uploadOAuthForOwner(w, r, id.UserID, secrets.OAuthKind(r.PathValue("kind")))
+}
+
+func (s *Server) handleRefreshOAuth(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	s.refreshOAuthForOwner(w, r, id.UserID, secrets.OAuthKind(r.PathValue("kind")))
+}
+
+func (s *Server) handleDeleteOAuth(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	s.deleteOAuthForOwner(w, r, id.UserID, secrets.OAuthKind(r.PathValue("kind")))
+}
+
+// ---- owner-keyed helpers (shared by /me and /teams) ----
+//
+// ownerKey is the OAuthStore "user_id" partition: the authenticated
+// user's id for the personal scope, or secrets.OrgOwnerKey(teamID) for
+// the org scope. Everything below is owner-agnostic.
+
+func (s *Server) listOAuthForOwner(w http.ResponseWriter, r *http.Request, ownerKey string) {
+	records, err := s.oauthStore.ListByUser(r.Context(), ownerKey)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
@@ -60,9 +104,137 @@ func (s *Server) handleListOAuthConnections(w http.ResponseWriter, r *http.Reque
 	}{Connections: views})
 }
 
-func (s *Server) handleUploadOAuthCredentials(w http.ResponseWriter, r *http.Request) {
-	id, _ := auth.FromContext(r.Context())
-	kind := secrets.OAuthKind(r.PathValue("kind"))
+// startOAuthForOwner kicks off the browser OAuth flow: it mints PKCE +
+// state, stashes them server-side, and returns the claude.ai authorize
+// URL for the studio to open. Only claude_code supports the browser flow
+// today (Codex keeps the paste fallback).
+func (s *Server) startOAuthForOwner(w http.ResponseWriter, r *http.Request, ownerKey string, kind secrets.OAuthKind) {
+	if !kind.Valid() {
+		httpError(w, http.StatusBadRequest, "unknown oauth kind")
+		return
+	}
+	if kind != secrets.OAuthKindClaudeCode {
+		httpError(w, http.StatusBadRequest, "browser oauth is only supported for claude_code; use the credentials paste for %s", kind)
+		return
+	}
+	if s.oauthPending == nil {
+		httpError(w, http.StatusServiceUnavailable, "browser oauth not configured")
+		return
+	}
+	clientID := s.cfg.AnthropicOAuthClientID
+	if clientID == "" {
+		httpError(w, http.StatusServiceUnavailable, "anthropic oauth client id not configured")
+		return
+	}
+	verifier, challenge, err := secrets.NewPKCE()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "pkce: %v", err)
+		return
+	}
+	state, err := secrets.NewOAuthState()
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "state: %v", err)
+		return
+	}
+	sealedVerifier, err := secrets.SealOAuthVerifier(s.sealer, ownerKey, kind, verifier)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "seal verifier: %v", err)
+		return
+	}
+	redirectURI := secrets.AnthropicRedirectURI()
+	now := time.Now().UTC()
+	if err := s.oauthPending.Put(r.Context(), secrets.OAuthPending{
+		OwnerKey:       ownerKey,
+		Kind:           kind,
+		SealedVerifier: sealedVerifier,
+		State:          state,
+		RedirectURI:    redirectURI,
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(secrets.DefaultOAuthPendingTTL),
+	}); err != nil {
+		httpError(w, http.StatusInternalServerError, "persist pending: %v", err)
+		return
+	}
+	writeJSON(w, struct {
+		AuthorizeURL string `json:"authorize_url"`
+		State        string `json:"state"`
+	}{
+		AuthorizeURL: secrets.AnthropicAuthorizeURL(clientID, redirectURI, challenge, state),
+		State:        state,
+	})
+}
+
+// completeOAuthForOwner finishes the browser flow: it consumes the
+// pending PKCE state, exchanges the pasted code for tokens, builds the
+// credentials.json blob, and seals it into the OAuthRecord — the exact
+// same stored shape the paste path produces.
+func (s *Server) completeOAuthForOwner(w http.ResponseWriter, r *http.Request, ownerKey string, kind secrets.OAuthKind) {
+	if !kind.Valid() || kind != secrets.OAuthKindClaudeCode {
+		httpError(w, http.StatusBadRequest, "browser oauth is only supported for claude_code")
+		return
+	}
+	if s.oauthPending == nil {
+		httpError(w, http.StatusServiceUnavailable, "browser oauth not configured")
+		return
+	}
+	var req struct {
+		Code  string `json:"code"`
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "bad json: %v", err)
+		return
+	}
+	// The headless page shows `code#state`; accept either the full string
+	// or a pre-split code, and prefer an explicit state field.
+	code, frag := secrets.SplitAnthropicCode(req.Code)
+	if code == "" {
+		httpError(w, http.StatusBadRequest, "missing authorization code")
+		return
+	}
+	pasteState := req.State
+	if pasteState == "" {
+		pasteState = frag
+	}
+	pending, err := s.oauthPending.Take(r.Context(), ownerKey, kind)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "no pending authorization (expired? restart the connect)")
+		return
+	}
+	// CSRF: when the page returned a state, it must match the one we
+	// minted. (Some headless flows drop the fragment — then we fall back
+	// to the single-pending-per-owner guarantee.)
+	if pasteState != "" && pasteState != pending.State {
+		httpError(w, http.StatusBadRequest, "state mismatch")
+		return
+	}
+	verifier, err := secrets.OpenOAuthVerifier(s.sealer, ownerKey, kind, pending.SealedVerifier)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "unseal verifier: %v", err)
+		return
+	}
+	res, err := secrets.ExchangeAnthropicCode(r.Context(), s.httpClient, s.cfg.AnthropicOAuthClientID, code, verifier, pending.RedirectURI, pending.State)
+	if err != nil {
+		httpError(w, http.StatusBadGateway, "code exchange: %v", err)
+		return
+	}
+	blob, err := secrets.BuildAnthropicCredentials(res)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "build credentials: %v", err)
+		return
+	}
+	rec, err := s.sealOAuthRecord(r.Context(), ownerKey, kind, blob)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "%s", err.Error())
+		return
+	}
+	s.logger.Info("oauth: owner=%s kind=%s connected via browser flow (expires=%v)", ownerKey, kind, rec.AccessTokenExpiresAt)
+	writeJSON(w, toOAuthView(rec))
+}
+
+// uploadOAuthForOwner ingests a raw credentials.json / auth.json blob
+// (the fallback to the browser flow).
+func (s *Server) uploadOAuthForOwner(w http.ResponseWriter, r *http.Request, ownerKey string, kind secrets.OAuthKind) {
 	if !kind.Valid() {
 		httpError(w, http.StatusBadRequest, "unknown oauth kind")
 		return
@@ -76,26 +248,36 @@ func (s *Server) handleUploadOAuthCredentials(w http.ResponseWriter, r *http.Req
 		httpError(w, http.StatusBadRequest, "empty body — paste the credentials.json / auth.json content")
 		return
 	}
+	rec, err := s.sealOAuthRecord(r.Context(), ownerKey, kind, body)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+	s.logger.Info("oauth: owner=%s kind=%s connected (sealed payload, expires=%v)", ownerKey, kind, rec.AccessTokenExpiresAt)
+	writeJSON(w, toOAuthView(rec))
+}
 
+// sealOAuthRecord validates a credentials blob, extracts expiry/scope
+// metadata, seals it bound to (ownerKey, kind), and upserts the record.
+// Shared by the browser flow and the paste path.
+func (s *Server) sealOAuthRecord(ctx context.Context, ownerKey string, kind secrets.OAuthKind, blob []byte) (secrets.OAuthRecord, error) {
 	now := time.Now().UTC()
 	rec := secrets.OAuthRecord{
 		// ID is derived in the OAuth store's Upsert (memory + Mongo
-		// agree on `<userID>|<kind>`), so we leave it empty here.
-		UserID:    id.UserID,
+		// agree on `<ownerKey>|<kind>`), so we leave it empty here.
+		UserID:    ownerKey,
 		Kind:      kind,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 	switch kind {
 	case secrets.OAuthKindClaudeCode:
-		v, err := secrets.ParseAnthropicView(body)
+		v, err := secrets.ParseAnthropicView(blob)
 		if err != nil {
-			httpError(w, http.StatusBadRequest, "%s", err.Error())
-			return
+			return secrets.OAuthRecord{}, err
 		}
 		if v.ClaudeAIOauth.AccessToken == "" {
-			httpError(w, http.StatusBadRequest, "credentials.json missing claudeAiOauth.accessToken")
-			return
+			return secrets.OAuthRecord{}, errors.New("credentials.json missing claudeAiOauth.accessToken")
 		}
 		if v.ClaudeAIOauth.ExpiresAt > 0 {
 			t := time.UnixMilli(v.ClaudeAIOauth.ExpiresAt).UTC()
@@ -103,44 +285,35 @@ func (s *Server) handleUploadOAuthCredentials(w http.ResponseWriter, r *http.Req
 		}
 		rec.Scopes = v.ClaudeAIOauth.Scopes
 	case secrets.OAuthKindCodex:
-		v, err := secrets.ParseCodexView(body)
+		v, err := secrets.ParseCodexView(blob)
 		if err != nil {
-			httpError(w, http.StatusBadRequest, "%s", err.Error())
-			return
+			return secrets.OAuthRecord{}, err
 		}
 		if v.Tokens.AccessToken == "" {
-			httpError(w, http.StatusBadRequest, "auth.json missing tokens.access_token")
-			return
+			return secrets.OAuthRecord{}, errors.New("auth.json missing tokens.access_token")
 		}
 		if v.Tokens.ExpiresIn > 0 {
 			t := time.Now().Add(time.Duration(v.Tokens.ExpiresIn) * time.Second).UTC()
 			rec.AccessTokenExpiresAt = &t
 		}
 	}
-
-	sealed, err := secrets.SealOAuthPayload(s.sealer, id.UserID, kind, body)
+	sealed, err := secrets.SealOAuthPayload(s.sealer, ownerKey, kind, blob)
 	if err != nil {
-		httpError(w, http.StatusInternalServerError, "seal: %v", err)
-		return
+		return secrets.OAuthRecord{}, fmt.Errorf("seal: %w", err)
 	}
 	rec.SealedPayload = sealed
-
-	if err := s.oauthStore.Upsert(r.Context(), rec); err != nil {
-		httpError(w, http.StatusInternalServerError, "%s", err.Error())
-		return
+	if err := s.oauthStore.Upsert(ctx, rec); err != nil {
+		return secrets.OAuthRecord{}, err
 	}
-	s.logger.Info("oauth: user=%s kind=%s connected (sealed payload, expires=%v)", id.UserID, kind, rec.AccessTokenExpiresAt)
-	writeJSON(w, toOAuthView(rec))
+	return rec, nil
 }
 
-func (s *Server) handleRefreshOAuth(w http.ResponseWriter, r *http.Request) {
-	id, _ := auth.FromContext(r.Context())
-	kind := secrets.OAuthKind(r.PathValue("kind"))
+func (s *Server) refreshOAuthForOwner(w http.ResponseWriter, r *http.Request, ownerKey string, kind secrets.OAuthKind) {
 	if !kind.Valid() {
 		httpError(w, http.StatusBadRequest, "unknown oauth kind")
 		return
 	}
-	rec, err := s.oauthStore.Get(r.Context(), id.UserID, kind)
+	rec, err := s.oauthStore.Get(r.Context(), ownerKey, kind)
 	if err != nil {
 		if errors.Is(err, secrets.ErrOAuthNotFound) {
 			httpError(w, http.StatusNotFound, "no oauth connection of kind %s", kind)
@@ -149,7 +322,7 @@ func (s *Server) handleRefreshOAuth(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "%s", err.Error())
 		return
 	}
-	if err := s.refreshOAuthRecord(r.Context(), &rec); err != nil {
+	if err := secrets.RefreshRecord(r.Context(), s.sealer, s.httpClient, s.cfg.AnthropicOAuthClientID, s.cfg.CodexOAuthClientID, &rec); err != nil {
 		httpError(w, http.StatusBadGateway, "refresh: %v", err)
 		return
 	}
@@ -160,14 +333,12 @@ func (s *Server) handleRefreshOAuth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, toOAuthView(rec))
 }
 
-func (s *Server) handleDeleteOAuth(w http.ResponseWriter, r *http.Request) {
-	id, _ := auth.FromContext(r.Context())
-	kind := secrets.OAuthKind(r.PathValue("kind"))
+func (s *Server) deleteOAuthForOwner(w http.ResponseWriter, r *http.Request, ownerKey string, kind secrets.OAuthKind) {
 	if !kind.Valid() {
 		httpError(w, http.StatusBadRequest, "unknown oauth kind")
 		return
 	}
-	if err := s.oauthStore.Delete(r.Context(), id.UserID, kind); err != nil {
+	if err := s.oauthStore.Delete(r.Context(), ownerKey, kind); err != nil {
 		if errors.Is(err, secrets.ErrOAuthNotFound) {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -176,75 +347,4 @@ func (s *Server) handleDeleteOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// refreshOAuthRecord drives the refresh exchange for one record and
-// rewrites its sealed payload with the new tokens. Returns an error
-// when the upstream provider rejects the refresh.
-func (s *Server) refreshOAuthRecord(ctx context.Context, rec *secrets.OAuthRecord) error {
-	payload, err := secrets.OpenOAuthPayload(s.sealer, rec.UserID, rec.Kind, rec.SealedPayload)
-	if err != nil {
-		return fmt.Errorf("unseal: %w", err)
-	}
-	now := time.Now().UTC()
-	switch rec.Kind {
-	case secrets.OAuthKindClaudeCode:
-		view, perr := secrets.ParseAnthropicView(payload)
-		if perr != nil {
-			return perr
-		}
-		clientID := strings.TrimSpace(s.cfg.AnthropicOAuthClientID)
-		if clientID == "" {
-			return fmt.Errorf("ITERION_OAUTH_FORFAIT_ANTHROPIC_CLIENT_ID not configured")
-		}
-		res, rerr := secrets.RefreshAnthropic(ctx, s.httpClient, clientID, view.ClaudeAIOauth.RefreshToken)
-		if rerr != nil {
-			return rerr
-		}
-		updated, uerr := secrets.ApplyAnthropicRefresh(payload, res)
-		if uerr != nil {
-			return uerr
-		}
-		sealed, serr := secrets.SealOAuthPayload(s.sealer, rec.UserID, rec.Kind, updated)
-		if serr != nil {
-			return serr
-		}
-		rec.SealedPayload = sealed
-		if !res.ExpiresAt.IsZero() {
-			t := res.ExpiresAt
-			rec.AccessTokenExpiresAt = &t
-		}
-		if len(res.Scopes) > 0 {
-			rec.Scopes = res.Scopes
-		}
-	case secrets.OAuthKindCodex:
-		view, perr := secrets.ParseCodexView(payload)
-		if perr != nil {
-			return perr
-		}
-		clientID := strings.TrimSpace(s.cfg.CodexOAuthClientID)
-		if clientID == "" {
-			return fmt.Errorf("ITERION_OAUTH_FORFAIT_OPENAI_CLIENT_ID not configured")
-		}
-		res, rerr := secrets.RefreshCodex(ctx, s.httpClient, clientID, view.Tokens.RefreshToken)
-		if rerr != nil {
-			return rerr
-		}
-		updated, uerr := secrets.ApplyCodexRefresh(payload, res)
-		if uerr != nil {
-			return uerr
-		}
-		sealed, serr := secrets.SealOAuthPayload(s.sealer, rec.UserID, rec.Kind, updated)
-		if serr != nil {
-			return serr
-		}
-		rec.SealedPayload = sealed
-		if !res.ExpiresAt.IsZero() {
-			t := res.ExpiresAt
-			rec.AccessTokenExpiresAt = &t
-		}
-	}
-	rec.LastRefreshedAt = &now
-	rec.UpdatedAt = now
-	return nil
 }

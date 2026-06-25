@@ -122,27 +122,71 @@ export async function deleteApiKey(
   await send(root, { method: "DELETE" });
 }
 
-// ---- OAuth-forfait (per-user) ----
+// ---- OAuth-forfait (per-user OR per-org) ----
 
-export async function listOAuthConnections(): Promise<OAuthConnection[]> {
-  const res = await send<{ connections: OAuthConnection[] }>(`/me/oauth/connections`);
+// OAuthScope selects the owner the credential is stored against: the
+// authenticated user (personal, the default) or a team/org (admin-only,
+// used as a fallback for automated runs with no human owner).
+export type OAuthScope = { mine: true } | { teamId: string };
+
+function oauthBase(scope: OAuthScope): string {
+  return "mine" in scope ? `/me/oauth` : `/teams/${encodeURIComponent(scope.teamId)}/oauth`;
+}
+
+export interface OAuthAuthorizeStart {
+  authorize_url: string;
+  state: string;
+}
+
+export async function listOAuthConnections(scope: OAuthScope = { mine: true }): Promise<OAuthConnection[]> {
+  const res = await send<{ connections: OAuthConnection[] }>(`${oauthBase(scope)}/connections`);
   return res.connections ?? [];
 }
 
-export async function uploadOAuthCredentials(kind: OAuthKind, blob: string): Promise<OAuthConnection> {
-  return send(`/me/oauth/${encodeURIComponent(kind)}/credentials`, {
+// startOAuthAuthorize kicks off the browser flow: the server mints PKCE +
+// state and returns the claude.ai authorize URL the studio opens in a new
+// tab. Only claude_code supports this; Codex keeps the paste path.
+export async function startOAuthAuthorize(
+  kind: OAuthKind,
+  scope: OAuthScope = { mine: true },
+): Promise<OAuthAuthorizeStart> {
+  return send(`${oauthBase(scope)}/${encodeURIComponent(kind)}/authorize/start`, { method: "POST" });
+}
+
+// completeOAuthAuthorize finishes the browser flow with the code the user
+// pasted from Anthropic's callback page (`code#state` accepted whole).
+export async function completeOAuthAuthorize(
+  kind: OAuthKind,
+  input: { code: string; state?: string },
+  scope: OAuthScope = { mine: true },
+): Promise<OAuthConnection> {
+  return send(`${oauthBase(scope)}/${encodeURIComponent(kind)}/authorize/complete`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function uploadOAuthCredentials(
+  kind: OAuthKind,
+  blob: string,
+  scope: OAuthScope = { mine: true },
+): Promise<OAuthConnection> {
+  return send(`${oauthBase(scope)}/${encodeURIComponent(kind)}/credentials`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: blob,
   });
 }
 
-export async function refreshOAuth(kind: OAuthKind): Promise<OAuthConnection> {
-  return send(`/me/oauth/${encodeURIComponent(kind)}/refresh`, { method: "POST" });
+export async function refreshOAuth(
+  kind: OAuthKind,
+  scope: OAuthScope = { mine: true },
+): Promise<OAuthConnection> {
+  return send(`${oauthBase(scope)}/${encodeURIComponent(kind)}/refresh`, { method: "POST" });
 }
 
-export async function deleteOAuth(kind: OAuthKind): Promise<void> {
-  await send(`/me/oauth/${encodeURIComponent(kind)}`, { method: "DELETE" });
+export async function deleteOAuth(kind: OAuthKind, scope: OAuthScope = { mine: true }): Promise<void> {
+  await send(`${oauthBase(scope)}/${encodeURIComponent(kind)}`, { method: "DELETE" });
 }
 
 // ---- Team management (a thin slice — full surface lives elsewhere) ----

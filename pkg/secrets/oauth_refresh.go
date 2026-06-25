@@ -125,6 +125,89 @@ func ApplyAnthropicRefresh(payload []byte, r RefreshResult) ([]byte, error) {
 	return json.MarshalIndent(raw, "", "  ")
 }
 
+// RefreshRecord drives the refresh exchange for one OAuthRecord and
+// rewrites its sealed payload in place with the new tokens. It is the
+// single refresh primitive shared by the HTTP handler (manual refresh)
+// and the background OAuthRefreshWorker — keep them on this function so
+// the two paths can never drift.
+//
+// The (userID, kind) AAD is derived from rec, so an org-scoped record
+// (rec.UserID == OrgOwnerKey(tenantID)) refreshes identically to a
+// personal one. Returns an error when the provider rejects the refresh
+// or no client_id is configured for the record's kind.
+func RefreshRecord(ctx context.Context, sealer Sealer, hc *http.Client, anthropicClientID, codexClientID string, rec *OAuthRecord) error {
+	if rec == nil {
+		return fmt.Errorf("secrets: RefreshRecord nil record")
+	}
+	payload, err := OpenOAuthPayload(sealer, rec.UserID, rec.Kind, rec.SealedPayload)
+	if err != nil {
+		return fmt.Errorf("secrets: unseal: %w", err)
+	}
+	now := time.Now().UTC()
+	switch rec.Kind {
+	case OAuthKindClaudeCode:
+		view, perr := ParseAnthropicView(payload)
+		if perr != nil {
+			return perr
+		}
+		clientID := strings.TrimSpace(anthropicClientID)
+		if clientID == "" {
+			return fmt.Errorf("secrets: anthropic oauth client id not configured")
+		}
+		res, rerr := RefreshAnthropic(ctx, hc, clientID, view.ClaudeAIOauth.RefreshToken)
+		if rerr != nil {
+			return rerr
+		}
+		updated, uerr := ApplyAnthropicRefresh(payload, res)
+		if uerr != nil {
+			return uerr
+		}
+		sealed, serr := SealOAuthPayload(sealer, rec.UserID, rec.Kind, updated)
+		if serr != nil {
+			return serr
+		}
+		rec.SealedPayload = sealed
+		if !res.ExpiresAt.IsZero() {
+			t := res.ExpiresAt
+			rec.AccessTokenExpiresAt = &t
+		}
+		if len(res.Scopes) > 0 {
+			rec.Scopes = res.Scopes
+		}
+	case OAuthKindCodex:
+		view, perr := ParseCodexView(payload)
+		if perr != nil {
+			return perr
+		}
+		clientID := strings.TrimSpace(codexClientID)
+		if clientID == "" {
+			return fmt.Errorf("secrets: codex oauth client id not configured")
+		}
+		res, rerr := RefreshCodex(ctx, hc, clientID, view.Tokens.RefreshToken)
+		if rerr != nil {
+			return rerr
+		}
+		updated, uerr := ApplyCodexRefresh(payload, res)
+		if uerr != nil {
+			return uerr
+		}
+		sealed, serr := SealOAuthPayload(sealer, rec.UserID, rec.Kind, updated)
+		if serr != nil {
+			return serr
+		}
+		rec.SealedPayload = sealed
+		if !res.ExpiresAt.IsZero() {
+			t := res.ExpiresAt
+			rec.AccessTokenExpiresAt = &t
+		}
+	default:
+		return fmt.Errorf("secrets: RefreshRecord unsupported kind %q", rec.Kind)
+	}
+	rec.LastRefreshedAt = &now
+	rec.UpdatedAt = now
+	return nil
+}
+
 // RefreshCodex mirrors RefreshAnthropic for the OpenAI Codex CLI.
 // clientID is the Codex CLI's published OAuth client; deployments
 // using a custom Codex fork override it.

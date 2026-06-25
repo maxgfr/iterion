@@ -226,6 +226,13 @@ type Config struct {
 	// a BYOK API key for the relevant provider.
 	OAuthForfait secrets.OAuthStore
 
+	// OAuthPending backs the browser OAuth (authorization-code + PKCE)
+	// flow — the short-lived per-(owner,kind) PKCE state held between
+	// /authorize/start and /authorize/complete. When non-nil (and a
+	// client id is configured) the studio can connect a forfait without
+	// `claude login` or pasting a credentials.json file.
+	OAuthPending secrets.OAuthPendingStore
+
 	// AnthropicOAuthClientID is the OAuth client id used to refresh
 	// Claude Code subscription tokens. Empty disables refresh of
 	// the claude_code kind (the user must re-upload on expiry).
@@ -406,6 +413,7 @@ type Server struct {
 	runSecrets        secrets.RunSecretsStore
 	sealer            secrets.Sealer
 	oauthStore        secrets.OAuthStore
+	oauthPending      secrets.OAuthPendingStore
 	webhookConfigs    webhooks.ConfigStore
 	webhookDeliveries webhooks.DeliveryStore
 	webhookCounter    webhooks.Counter
@@ -571,6 +579,7 @@ func New(cfg Config, logger *iterlog.Logger) *Server {
 		orgDomains:        cfg.OrgDomains,
 		orgDomainTXT:      orgsso.DefaultTXTLookup(),
 		oauthStore:        cfg.OAuthForfait,
+		oauthPending:      cfg.OAuthPending,
 		webhookConfigs:    cfg.WebhookConfigs,
 		webhookDeliveries: cfg.WebhookDeliveries,
 		webhookCounter:    cfg.WebhookCounter,
@@ -788,6 +797,43 @@ func (s *Server) ListenAndServe() error {
 				case <-t.C:
 					if _, err := worker.RunOnce(ctx); err != nil && s.logger != nil {
 						s.logger.Warn("forge token refresh: %v", err)
+					}
+				}
+			}
+		}()
+	}
+	// OAuth-forfait token refresh: proactively rotate Claude Code (and
+	// Codex) subscription access tokens before they expire so neither an
+	// interactive run nor an automated (webhook/dispatcher/cron) run ever
+	// reads a stale credential. Covers personal AND org-scoped records.
+	// No-op without a store/sealer or any configured client id.
+	if s.oauthStore != nil && s.sealer != nil && (s.cfg.AnthropicOAuthClientID != "" || s.cfg.CodexOAuthClientID != "") {
+		worker := &secrets.OAuthRefreshWorker{
+			Store:             s.oauthStore,
+			Sealer:            s.sealer,
+			HTTP:              s.httpClient,
+			AnthropicClientID: s.cfg.AnthropicOAuthClientID,
+			CodexClientID:     s.cfg.CodexOAuthClientID,
+			Lead:              30 * time.Minute,
+		}
+		go func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go func() {
+				<-s.shutdown
+				cancel()
+			}()
+			t := time.NewTicker(10 * time.Minute)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					if n, err := worker.RunOnce(ctx); err != nil && s.logger != nil {
+						s.logger.Warn("oauth-forfait refresh: %v", err)
+					} else if n > 0 && s.logger != nil {
+						s.logger.Info("oauth-forfait refresh: rotated %d token(s)", n)
 					}
 				}
 			}
@@ -1075,6 +1121,11 @@ func (s *Server) routes() {
 	// user OAuthForfait store.
 	if s.oauthStore != nil && s.sealer != nil && s.authSvc != nil {
 		s.registerOAuthForfaitRoutes()
+		// Team/org-scoped mirror (admin-gated). Only meaningful when the
+		// auth store can resolve team membership.
+		if s.authStore() != nil {
+			s.registerOAuthTeamRoutes()
+		}
 	}
 
 	// Dispatcher + native tracker — both optional. Each handler is

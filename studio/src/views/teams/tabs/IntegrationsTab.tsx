@@ -15,6 +15,7 @@ import { InlineBanner } from "@/components/ui/InlineBanner";
 import { useConfirm } from "@/hooks/useConfirm";
 import { isRepoCapable } from "@/lib/triggers";
 import { useBotsStore } from "@/store/bots";
+import OAuthConnections from "@/views/settings/OAuthConnections";
 
 import { ConnectForm } from "./integrations/ConnectForm";
 import { ConnectionCard } from "./integrations/ConnectionCard";
@@ -144,6 +145,12 @@ export default function IntegrationsTab({
           onConnected={reload}
           onError={setErr}
         />
+      )}
+
+      {canManage && (
+        <div className="pt-4 border-t border-border-subtle">
+          <OAuthConnections scope={{ teamId: teamID }} org />
+        </div>
       )}
     </div>
   );
